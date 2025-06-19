@@ -1,10 +1,7 @@
 
 #include <algorithm>
-#include <cstdio>
-#include <cstring>
 #include <vector>
 #include <random>
-#include <span>
 #include "./network.cpp"
 
 /*
@@ -51,6 +48,7 @@ namespace ML::networks {
 		// helpers
 		// ------------------------------------------------------------
 
+		// TODO - rand generator reference should be provided to functions instead of being class member.
 		float rand(float a, float b) {
 			std::uniform_real_distribution<float> distr(a, b);
 			return distr(gen32);
@@ -68,9 +66,18 @@ namespace ML::networks {
 		// network functions
 		// ------------------------------------------------------------
 
-		void apply_batch_loss() override {}// TODO
-
-		void reset_batch_loss() override {}// TODO
+		void apply_batch_error(float rate) override {
+			for(int n=0;n<neurons.size();n++) {
+				neuron_t& neuron = neurons[n];
+				neuron.bias += neuron.bias_error * rate;
+				neuron.bias_error = 0;
+				for(int i=0;i<neuron.targets_len;i++) {
+					target_t& target = targets[neuron.targets_ofs + i];
+					target.weight += target.weight_error * rate;
+					target.weight_error = 0;
+				}
+			}
+		}
 
 		void propagate(std::vector<float>& input_values, std::vector<float>& output_values) override {
 			// compute activations.
@@ -78,7 +85,7 @@ namespace ML::networks {
 				neuron_t& neuron = neurons[n];
 				float sum = neuron.bias;
 				for(int i=0;i<neuron.targets_len;i++) {
-					const target_t& target = targets[neuron.targets_ofs + i];
+					target_t& target = targets[neuron.targets_ofs + i];
 					sum += target.weight * input_values[target.index];
 				}
 				neuron.signal = sum;
@@ -101,6 +108,14 @@ namespace ML::networks {
 					input_error[target.index] += signal_error_term * target.weight;
 				}
 			}
+
+			// normalize input error to match output error.
+			float isum = 0;
+			float osum = 0;
+			for(int x=0;x< input_error.size();x++) isum +=  input_error[x];
+			for(int x=0;x<output_error.size();x++) osum += output_error[x];
+			float mult = osum / isum;
+			for(int x=0;x< input_error.size();x++) input_error[x] *= mult;
 		}
 	};
 }

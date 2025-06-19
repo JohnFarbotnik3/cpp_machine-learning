@@ -16,6 +16,10 @@
 	propagation steps per call to "propagate()".
 	- the value history is needed so that backpropagation knows the value
 	at each propagation step, in order to accurately compute errors & adjustments.
+	- in much the same way as errors are normalized such that input error and output error match
+	in layer-network implementation, the graph should keep track of total error distributed per-step
+	so that it can be normalized against the error from previous step / output.
+	this may benefit from a decaying scale factor, in similar fashion to reinforcement learning.
 */
 namespace ML::networks {
 	using index_t = unsigned int;

@@ -2,10 +2,8 @@
 #include <vector>
 namespace ML::networks {
 	struct network {
-		/* adjust weights and biases according to batch loss. */
-		virtual void apply_batch_loss();
-		/* clear accumulated batch loss before running next batch. */
-		virtual void reset_batch_loss();
+		/* adjust weights and biases according to batch loss, then clear accumulated values. */
+		virtual void apply_batch_error(float rate);
 
 		/* run forward-propagation in the network. */
 		virtual void propagate(std::vector<float>& input, std::vector<float>& output);
