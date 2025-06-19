@@ -14,8 +14,8 @@ namespace ML::models {
 				this->w = w;
 				this->h = h;
 			}
-			int  get_index(int x, int y) { return x*h + y; }
-			bool in_bounds(int x, int y) { return (0 <= x) & (x < w) & (0 <= y) & (y < h); }
+			int  get_index(int x, int y) const { return x*h + y; }
+			bool in_bounds(int x, int y) const { return (0 <= x) & (x < w) & (0 <= y) & (y < h); }
 		};
 
 		int input_w;
@@ -38,19 +38,33 @@ namespace ML::models {
 		//       (on both input and output side of tiling).
 		// ------------------------------------------------------------
 		// connect NxN squares to NxN squares.
-		void push_layer_4x4_to_4x4(const dimensions input_dim, dimensions& output_dim, const int tile_offset_xy) {
-			output_dim = dimensions(input_dim.w/2, input_dim.h/2);
+		template<int N>
+		void push_layer_NxN_to_NxN(const dimensions input_dim, dimensions& output_dim, const int tile_offset_xy) {
+			output_dim = dimensions(input_dim.w, input_dim.h);
+			layer_network output_layer(12345);
 			// for each tile in input...
-			const int x0 = tile_offset_xy - 4;
-			const int y0 = tile_offset_xy - 4;
-			for(int x=x0;x<output_dim.w;x+=4) {
-			for(int y=y0;y<output_dim.h;y+=4) {
-				// create 4x4 square of output neurons.
-				// TODO
-				// create 4x4 square of input connections for each neuron.
-				// TODO...
+			const int tx = tile_offset_xy-N;
+			const int ty = tile_offset_xy-N;
+			for(int x=tx;x<output_dim.w;x+=N) {
+			for(int y=ty;y<output_dim.h;y+=N) {
+				// create NxN square of output neurons.
+				for(int nx=x;nx<x+N;nx++) {
+				for(int ny=y;ny<y+N;ny++) {
+				if(output_dim.in_bounds(nx, ny)) {
+					// create NxN square of input connections for each neuron.
+					auto& targets = output_layer.targets;
+					const int ofs = targets.size();
+					for(int cx=x;cx<x+N;cx++) {
+					for(int cy=y;cy<y+N;cy++) {
+					if(input_dim.in_bounds(cx, cy)) {
+						targets.push_back(layer_target(input_dim.get_index(cx, cy)));
+					}}}
+					const int len = targets.size() - ofs;
+					output_layer.neurons.push_back(layer_neuron(len, ofs));
+				}}}
 			}}
-			// TODO
+			// push layer into list.
+			layers.push_back(output_layer);
 		}
 		void push_layer_8x8_to_8x8(const dimensions input_dim, dimensions& output_dim, const int tile_offset_xy) {}// TODO
 		// condense from (w,h) to (w/2, h/2), with input  tiles offset by tile_offset.

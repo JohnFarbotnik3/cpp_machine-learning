@@ -14,17 +14,29 @@
 namespace ML::networks {
 
 	struct layer_neuron {
-		float signal;		// sum of input activations and bias - used for backpropagation.
-		float bias;			// bias of neuron[x] in the network.
-		float bias_error;	// cumulative adjustment to apply to bias.
-		int targets_len;	// number of input targets.
-		int targets_ofs;	// start position of input-targets list.
+		float signal 	= 0;// sum of input activations and bias - used for backpropagation.
+		float bias		= 0;// bias of neuron[x] in the network.
+		float bias_error= 0;// cumulative adjustment to apply to bias.
+		int targets_len	= 0;// number of input targets.
+		int targets_ofs	= 0;// start position of input-targets list.
+
+		layer_neuron() = default;
+		layer_neuron(int len, int ofs) {
+			this->targets_len = len;
+			this->targets_ofs = ofs;
+		}
 	};
 
 	struct layer_target {
 		int index;			// index of target value/neuron.
 		float weight;
 		float weight_error;	// cumulative adjustment to apply to weight.
+
+		layer_target(int index) {
+			this->index = index;
+			this->weight = 0;
+			this->weight_error = 0;
+		}
 	};
 
 	/*
