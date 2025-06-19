@@ -9,6 +9,13 @@
 
 	neurons use the previous activation value of target-neurons
 	instead of the current value in order to support recurrence cleanly.
+
+	NOTES:
+	- unlike the simple layer-network (see "layer.cpp"), this struct
+	stores values/value-history internally in order to support multiple
+	propagation steps per call to "propagate()".
+	- the value history is needed so that backpropagation knows the value
+	at each propagation step, in order to accurately compute errors & adjustments.
 */
 namespace ML::networks {
 	using index_t = unsigned int;
@@ -80,7 +87,24 @@ namespace ML::networks {
 		}
 
 		void propagate(std::vector<float>& input, std::vector<float>& output) override {
-			// TODO.
+			/*
+				TODO
+
+				NOTE: the input neurons dont need to be wasted space;
+				we start be reading the running the input-section of the graph,
+				reading from connections by index like the rest of the graph neurons do
+				but targeting input vector instead.
+				NOTE: since the input wont change during multiple internal propagation-steps,
+				we only need to update the rest of the graph when in the stepping loop.
+			*/
+
+			/*
+			// make sure lengths match. - NOTE: we dont need to do that, see above...
+			vector<neuron_t>  input_layer = layers[0];
+			vector<neuron_t> output_layer = layers[layers.size() - 1];
+			if( input.size() !=  input_layer.size()) { fprintf(stderr, "ERROR:  input lengths dont match: %u != %u\n",  input.size(),  input_layer.size()); return; }
+			if(output.size() != output_layer.size()) { fprintf(stderr, "ERROR: output lengths dont match: %u != %u\n", output.size(), output_layer.size()); return; }
+			*/
 		}
 
 		// TODO

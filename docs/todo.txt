@@ -12,3 +12,7 @@ as well as per-iteration loss, in order to get better data-locality.
 	- what to biases contribute to a machine learning model?
 	- how are biases trained differently from weights?
 ...
+
+* how to train weights and biases:
+https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
+
