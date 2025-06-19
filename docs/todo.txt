@@ -2,11 +2,13 @@
 * create a logistics structure to pass into propagate() and backpropagate()
 to collection (and visualize) information about the training process.
 
+
 * create optimized variants of the simplified network modules in the "networks"
 folder by copying file, appending "_o1", "_o2", etc. and then optimizing whatever looks like
 it will produce the biggest speedup.
 ^ in particular, reducing size of neuron structures by extracting values/value-histories from neurons,
 as well as per-iteration loss, in order to get better data-locality.
+
 
 ? should we train biases at all?
 	- what to biases contribute to a machine learning model?
@@ -15,4 +17,19 @@ as well as per-iteration loss, in order to get better data-locality.
 
 * how to train weights and biases:
 https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
+
+
+> create visualizations showing the actual neural network itself.
+- have rendering functions drawing layers as a W x H grid of neurons.
+- also draw connections and activation values.
+* this can help locate and troubleshoot intialization bugs/typos.
+* this would also be very pretty.
+- layers and graphs will require slightly (or significantly) different drawing logic.
+* allow directly modifying model parameters by clicking on a neuron or connection.
+^ when neuron or connection is clicked, it is added to a list.
+^ each list item will have a group of sliders/text-inputs for modifying value.
+
+
+* it might make sense to add W x H dimensions to the sub-networks (layer/graph) themselves,
+as it gives clues about what the layer is for, as well as hinting at preferred memory layout.
 
