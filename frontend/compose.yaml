@@ -1,0 +1,12 @@
+services:
+    node_service:
+        image: node@sha256:224173ad6a700ec322c7117f616836d0dc6cadd8d6baac57703ccc2eb418a73f
+        user: node
+        command: sh
+        ports:
+            - 4173:4173
+            - 5173:5173
+        volumes:
+            - ./workspace:/workspace:rw
+        #stdin_open: true # docker run -i
+        #tty: true        # docker run -t

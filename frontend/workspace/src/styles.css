@@ -1,0 +1,61 @@
+
+:root {
+	--navbar_bg				: #c6efc6;
+	--navbar_bg_button_0	: none;
+	--navbar_bg_button_1	: #00e095;
+	--navbar_bg_button_hvr	: #00e09550;
+	--navbar_btn_font_size	: 14px;
+	--navbar_btn_padding	: 4px;
+
+	--outline_clr_medium	: #777;
+	--outline_clr_soft		: #7777;
+
+	--post_margin	: 2px 0px 2px 0px;
+	--post_padding	: 2px;
+}
+
+body {
+	height: 100vh;
+	margin: 0px;
+}
+
+button, div, span, a, p {
+	font-size: 14px;
+}
+
+a {
+	text-decoration: none;
+	color: unset;
+}
+
+button {
+	border: unset;
+	border-radius: 2px;
+	outline: 1px solid var(--outline_clr_medium);
+	outline-offset: -1px;
+}
+button:focus, div:focus[role="button"], a:focus {
+	outline: 1px solid #007cff90 !important;
+	outline-offset: -1px;
+}
+
+#app {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+}
+
+#nav {
+	padding: 0px;
+}
+
+#body {
+	display: flex;
+	flex-direction: column;
+	flex-grow: 1;
+	overflow-y: scroll;
+	padding: 10px;
+}
+
+

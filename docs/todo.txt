@@ -33,3 +33,57 @@ https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
 * it might make sense to add W x H dimensions to the sub-networks (layer/graph) themselves,
 as it gives clues about what the layer is for, as well as hinting at preferred memory layout.
 
+
+
+> frontend:
+* NOTE: model input data will be put in a folder near the application binary
+^ TODO: add config file with:
+	- input-directory
+	- model-directory
+	- output-directory (for when user saves autoencoder image outputs)
+- controls:
+	- slider: learning rate (exponential scaling)
+	- slider: batch size
+	- buttons: reset / start / stop
+- logistics:
+	- graph: error
+	- div: time taken per iteration / mini-batch / full-batch
+	- div: # files in dataset / total size (MiB)
+	- div: # neurons / # connections
+	- image: input / output
+	- canvas: model render (neurons and connections)
+- model interactions (at a later-stage in project):
+	- manipulate embedding values then propage decoder
+	- set custom input image then run autoencoder (without applying training)
+...
+
+
+> todo: deduplicate copied files
+- files: fileIO.cpp, string_manip.cpp
+* create a library folder outside each project and softlink to its "src" directory instead.
+* instantiate a git repo for it
+
+
+> todo: config + image loading
+- get an image loading library (such as SOIL)
+- put images in test input directory and make sure SOIL can load them properly
+(sanity check by getting average RGBA of some test images)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
