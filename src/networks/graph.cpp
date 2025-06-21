@@ -10,6 +10,10 @@
 	neurons use the previous activation value of target-neurons
 	instead of the current value in order to support recurrence cleanly.
 
+	WARNING: this implementation is partial and very outdated.
+	once autoencoder has been completed and tested,
+	I will have a better idea of what I expect from a good graph layer.
+
 	NOTES:
 	- unlike the simple layer-network (see "layer.cpp"), this struct
 	stores values/value-history internally in order to support multiple

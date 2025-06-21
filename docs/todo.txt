@@ -1,7 +1,4 @@
 
-* create a logistics structure to pass into propagate() and backpropagate()
-to collection (and visualize) information about the training process.
-
 
 * create optimized variants of the simplified network modules in the "networks"
 folder by copying file, appending "_o1", "_o2", etc. and then optimizing whatever looks like
@@ -9,11 +6,6 @@ it will produce the biggest speedup.
 ^ in particular, reducing size of neuron structures by extracting values/value-histories from neurons,
 as well as per-iteration loss, in order to get better data-locality.
 
-
-? should we train biases at all?
-	- what to biases contribute to a machine learning model?
-	- how are biases trained differently from weights?
-...
 
 * how to train weights and biases:
 https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
@@ -33,6 +25,10 @@ https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
 * it might make sense to add W x H dimensions to the sub-networks (layer/graph) themselves,
 as it gives clues about what the layer is for, as well as hinting at preferred memory layout.
 
+
+> training note - image output error:
+- when generating output_error, area outside the image will be ignored (error=0),
+as in theory we would be storing both the image embedding-vector and original image metadata.
 
 
 > frontend:
@@ -58,17 +54,17 @@ as it gives clues about what the layer is for, as well as hinting at preferred m
 ...
 
 
-> todo: deduplicate copied files
-- files: fileIO.cpp, string_manip.cpp
-* create a library folder outside each project and softlink to its "src" directory instead.
-* instantiate a git repo for it
+
+* create a logistics structure to pass into propagate() and backpropagate()
+to collection (and visualize) information about the training process.
 
 
 > todo: config + image loading
-- get an image loading library (such as SOIL)
+- get an image loading library (such as SOIL or stb_image)
 - put images in test input directory and make sure SOIL can load them properly
 (sanity check by getting average RGBA of some test images)
-
+- also make sure to verify autoencoder topology by
+sampling some neurons & connections from various layers to check their input-coordinates.
 
 
 

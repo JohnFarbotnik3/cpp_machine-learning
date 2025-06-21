@@ -1,7 +1,6 @@
 
 #include <algorithm>
 #include <vector>
-#include <random>
 #include "./network.cpp"
 
 /*
@@ -50,21 +49,10 @@ namespace ML::networks {
 
 		std::vector<neuron_t>	neurons;
 		std::vector<target_t>	targets;
-		std::mt19937 gen32;
-
-		layer_network(int seed) {
-			this->gen32 = std::mt19937(seed);
-		}
 
 		// ============================================================
 		// helpers
 		// ------------------------------------------------------------
-
-		// TODO - rand generator reference should be provided to functions instead of being class member.
-		float rand(float a, float b) {
-			std::uniform_real_distribution<float> distr(a, b);
-			return distr(gen32);
-		}
 
 		float activation_func(float value) {
 			return std::max<float>(value, 0);
