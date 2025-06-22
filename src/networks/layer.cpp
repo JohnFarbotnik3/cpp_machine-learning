@@ -93,7 +93,7 @@ namespace ML::networks {
 			}
 		}
 
-		void back_propagate(std::vector<float>& input_error, std::vector<float>& output_error, std::vector<float>& input_values) override {
+		void back_propagate(std::vector<float>& output_error, std::vector<float>& input_error, std::vector<float>& input_values) override {
 			// clear input error.
 			for(int x=0;x<input_error.size();x++) input_error[x] = 0;
 
