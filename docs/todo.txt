@@ -60,18 +60,15 @@ to collection (and visualize) information about the training process.
 
 
 > todo: config + image loading
-- get an image loading library (such as SOIL or stb_image)
+- pass config filepath by commandline argument.
 - put images in test input directory and make sure SOIL can load them properly
 (sanity check by getting average RGBA of some test images)
-- also make sure to verify autoencoder topology by
+- run autoencoder in commandline first, doing N prop-backprop cycles,
+logging total-output-error, and outputting some RGBA images along the way.
+? also make sure to verify autoencoder topology by
 sampling some neurons & connections from various layers to check their input-coordinates.
 
-
-
-
-
-
-
+* start by implementing and testing as a CLI program, then try to connect it to a browser after.
 
 
 
