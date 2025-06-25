@@ -26,12 +26,9 @@ https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
 as it gives clues about what the layer is for, as well as hinting at preferred memory layout.
 
 
-> training note - image output error:
-- when generating output_error, area outside the image will be ignored (error=0),
-as in theory we would be storing both the image embedding-vector and original image metadata.
-
 
 > frontend:
+! start by implementing and testing as a CLI program, then try to connect it to a browser after.
 * NOTE: model input data will be put in a folder near the application binary
 ^ TODO: add config file with:
 	- input-directory
@@ -58,6 +55,10 @@ as in theory we would be storing both the image embedding-vector and original im
 * create a logistics structure to pass into propagate() and backpropagate()
 to collection (and visualize) information about the training process.
 
+> training note - image output error:
+- when generating output_error, area outside the image will be ignored (error=0),
+as in theory we would be storing both the image embedding-vector and original image metadata.
+
 
 > todo: config + image loading
 - pass config filepath by commandline argument.
@@ -68,9 +69,17 @@ logging total-output-error, and outputting some RGBA images along the way.
 ? also make sure to verify autoencoder topology by
 sampling some neurons & connections from various layers to check their input-coordinates.
 
-* start by implementing and testing as a CLI program, then try to connect it to a browser after.
 
 
+
+* write an image sampler which takes an image and samples pixels from it to create
+a smaller image that is suitable for training with.
+^ if the image dimensions dont match the desired input dimensions,
+then fit (and center) them to input area, filling remaining area with blank pixels (rgba = [0,0,0,0]).
+^ all the sampled images should be generated first before training, so sampling doesnt need
+to be repeated every minibatch.
+^ output sample images as a sanity check.
+^ have different sampling algorithms (single pixel, weighted average of nearest 3x3, etc.).
 
 
 

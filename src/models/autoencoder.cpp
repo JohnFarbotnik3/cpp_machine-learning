@@ -9,7 +9,6 @@ namespace ML::models {
 	using std::vector;
 	using namespace ML::networks;
 	using namespace ML::image;
-	using pixel_iterator = ML::image::pixel_iterator_rgba_4x1_rows;
 
 	struct autoencoder {
 
