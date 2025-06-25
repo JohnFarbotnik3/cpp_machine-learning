@@ -1,9 +1,12 @@
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
+#include "./utils/file_io.cpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "./stb-master/stb_image.h"
@@ -15,7 +18,8 @@
 namespace ML::image {
 	using std::vector;
 	using std::string;
-	using std::unique_ptr;
+	using std::unique_ptr;// TODO - check if there is a performance difference between unique_ptr and vector.
+	namespace fs = std::filesystem;
 	using byte = unsigned char;
 
 	template<class T>
@@ -27,12 +31,6 @@ namespace ML::image {
 			T y = (a.y * a_mult) + (b.y * b_mult);
 			return vec2<T>{ x,y };
 		}
-	};
-
-	template<class T>
-	struct rectangle {
-		vec2<T> p0;
-		vec2<T> p1;
 	};
 
 	struct image_dimensions {
@@ -72,69 +70,129 @@ namespace ML::image {
 			return list;
 	}
 
-	struct sample_image {
-		unique_ptr<float[]> data;
-		// dimensions of sample data.
+	/*
+		image containing RGBA byte data loaded from image files.
+		these are typically all loaded before training.
+
+		due to memory constraints, these are stored as bytes
+		and then converted to floats during sampling.
+	*/
+	struct loaded_image {
+		string path;
+		vector<byte> data;
 		int w;
 		int h;
-		// relevant sample area - only the active sample area is used for computing loss.
-		int area_x;
-		int area_y;
-		int area_w;
-		int area_h;
+		int c;// number of channels the original image has. NOTE: loaded_image always has 4 channels.
 
-		sample_image(int w, int h, string filepath) {
-			this->data = unique_ptr<float[]>(new float[w*h*4]);
-			this->w = w;
-			this->h = h;
+		loaded_image(string filepath) {
+			path = filepath;
+			// load image from file using stb.
+			byte* imgdata = stbi_load(filepath.c_str(), &w, &h, &c, 4);
+			if(imgdata == NULL) {
+				w=0;
+				h=0;
+			} else {
+				int size = w * h * 4;
+				vector<byte> imgdata_loaded(imgdata, imgdata+size);
+				data = flip_data_y(imgdata_loaded, w, h);
+			}
+		}
 
-			// load image from file.
-			int imgw;
-			int imgh;
-			int imgc;// number of channels in original image.
-			unique_ptr<byte[]> imgdata_loaded(stbi_load(filepath.c_str(), &imgw, &imgh, &imgc, 4));
-			unique_ptr<byte[]> imgdata_result = flip_data_y(imgdata_loaded, imgw, imgh);
-			unique_ptr<float[]> imgdata_floats = image_bytes_to_floats(imgdata_result, imgw, imgh);
-
-			// sample image.
-			sample_1x1(imgdata_floats, imgw, imgh);
+		void print() const {
+			printf("<loaded_image>\n");
+			printf("path   : %s\n", path.c_str());
+			printf("area   : %i x %i (%i channels)\n", w, h, c);
+			printf("memsize: %.3f MiB\n", float(data.size()*sizeof(byte))/(1024*1024));
 		}
 
 	private:
 		// flip image data in the y-axis.
-		unique_ptr<byte[]> flip_data_y(const unique_ptr<byte[]>& imgdata, const int imgw, const int imgh) {
-			unique_ptr<byte[]> temp(new byte[imgw*imgh*4]);
+		vector<byte> flip_data_y(const vector<byte>& imgdata, const int imgw, const int imgh) {
+			vector<byte> temp(imgdata.size());
 			for(int y=0;y<imgh;y++) {
 				int i_in = imgw * 4 * (imgh-1-y);
 				int i_fl = imgw * 4 * y;
-				memcpy(temp.get() + i_fl, imgdata.get() + i_in, imgw * 4 * sizeof(byte));
+				memcpy(temp.data() + i_fl, imgdata.data() + i_in, imgw * 4 * sizeof(byte));
 			}
 			return temp;
 		}
-		// convert bytes to floats.
-		unique_ptr<float[]> image_bytes_to_floats(const unique_ptr<byte[]>& bytes, const int imgw, const int imgh) {
-			const int len = imgw*imgh*4;
-			const float m = 1.0f / 255.0f;
-			unique_ptr<float[]> floats(new float[len]);
-			for(int x=0;x<len;x++) floats[x] = float(bytes[x]) * m;
-			return floats;
-		}
-		// convert floats to bytes.
-		unique_ptr<byte[]> image_floats_to_bytes(const unique_ptr<float[]>& floats, const int imgw, const int imgh) {
-			const int len = imgw*imgh*4;
-			const float m = 255.0f;
-			unique_ptr<byte[]> bytes(new byte[len]);
-			for(int x=0;x<len;x++) bytes[x] = byte(floats[x] * m);
-			return bytes;
-		}
 
-		// samples individual pixels from input image.
-		void sample_1x1(const unique_ptr<float[]>& imgdata, const int imgw, const int imgh) {
-			//TODO
-			// NOTE: remember to set active sample area as well.
+	public:
+		bool save(string filepath) {
+			bool allowed = utils::file_io::can_write_file(filepath);
+			if(!allowed) return false;
+			int status;
+			utils::file_io::write_file(filepath, status, data.data(), data.size() * sizeof(byte));
+			return status == 0;
 		}
-		// samples individual pixels from input image.
-		void sample_3x3_weighted_sum() {}//TODO
 	};
+
+	vector<loaded_image> load_images_in_directory(string dir) {
+		// iterate through directory - loading files with recognized exteions.
+		vector<loaded_image> images;
+		vector<string> extensions = { ".png", ".jpg", ".jpeg" };
+		fs::directory_iterator iter(dir);
+		for(const fs::directory_entry entry : iter) {
+			bool match = false;
+			string f_path = entry.path().string();
+			string f_ext  = entry.path().extension().string();
+			for(const string& ext : extensions) if(ext.compare(f_ext) == 0) match=true;
+			if(match) {
+				printf("loading image: %s [%s]\n", f_ext.c_str(), f_path.c_str());
+				images.push_back(loaded_image(f_path));
+			} else {
+				printf("unrecognized extension: %s [%s]\n", f_ext.c_str(), f_path.c_str());
+			}
+		}
+		return images;
+	}
+
+	struct sample_area {
+		int x,y,w,h;
+	};
+
+	/*
+		generate input values by sampling loaded training images.
+
+		- if the original image is smaller than the input area,
+		then the image is just copied to input and centered.
+
+		- if the original image is larger than the input area,
+		then it is scaled to fit in input area.
+
+		values outside the sample area are set to 0 and are ignored
+		when computing error.
+	*/
+	sample_area generate_sample(const loaded_image& image, vector<float>& input_values, const int input_w, const int input_h) {
+		// TODO
+		// - move sampling and float conversion here.
+	};
+
+
+	// OLD CODE ------------------------------------------------------------
+	// convert bytes to floats.
+	unique_ptr<float[]> image_bytes_to_floats(const unique_ptr<byte[]>& bytes, const int imgw, const int imgh) {
+		const int len = imgw*imgh*4;
+		const float m = 1.0f / 255.0f;
+		unique_ptr<float[]> floats(new float[len]);
+		for(int x=0;x<len;x++) floats[x] = float(bytes[x]) * m;
+		return floats;
+	}
+	// convert floats to bytes.
+	unique_ptr<byte[]> image_floats_to_bytes(const unique_ptr<float[]>& floats, const int imgw, const int imgh) {
+		const int len = imgw*imgh*4;
+		const float m = 255.0f;
+		unique_ptr<byte[]> bytes(new byte[len]);
+		for(int x=0;x<len;x++) bytes[x] = byte(floats[x] * m);
+		return bytes;
+	}
+
+	// samples individual pixels from input image.
+	void sample_1x1(const unique_ptr<float[]>& imgdata, const int imgw, const int imgh) {
+		//TODO
+		// NOTE: remember to set active sample area as well.
+	}
+	// samples individual pixels from input image.
+	void sample_3x3_weighted_sum() {}//TODO
 
 }
