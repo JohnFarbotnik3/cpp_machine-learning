@@ -10,6 +10,8 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "./stb-master/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "./stb-master/stb_image_write.h"
 
 /*
 	NOTE: this namespace assumes that image-data is in row-major form
@@ -77,37 +79,26 @@ namespace ML::image {
 		due to memory constraints, these are stored as bytes
 		and then converted to floats during sampling.
 	*/
-	struct loaded_image {
-		string path;
-		vector<byte> data;
-		int w;
-		int h;
-		int c;// number of channels the original image has. NOTE: loaded_image always has 4 channels.
-
-		loaded_image(string filepath) {
-			path = filepath;
-			// load image from file using stb.
-			byte* imgdata = stbi_load(filepath.c_str(), &w, &h, &c, 4);
-			if(imgdata == NULL) {
-				w=0;
-				h=0;
-			} else {
-				int size = w * h * 4;
-				vector<byte> imgdata_loaded(imgdata, imgdata+size);
-				data = flip_data_y(imgdata_loaded, w, h);
-			}
-		}
+	struct file_image {
+		string path = "";
+		vector<byte> data = vector<byte>(0);
+		int w = 0;
+		int h = 0;
+		int ch_orig = 0;
 
 		void print() const {
 			printf("<loaded_image>\n");
 			printf("path   : %s\n", path.c_str());
-			printf("area   : %i x %i (%i channels)\n", w, h, c);
+			printf("area   : %i x %i (%i channels)\n", w, h, ch_orig);
 			printf("memsize: %.3f MiB\n", float(data.size()*sizeof(byte))/(1024*1024));
 		}
 
-	private:
+		int get_offset(int x, int y) const {
+			return (y*w + x) * 4;
+		}
+
 		// flip image data in the y-axis.
-		vector<byte> flip_data_y(const vector<byte>& imgdata, const int imgw, const int imgh) {
+		static vector<byte> flip_data_y(const vector<byte>& imgdata, const int imgw, const int imgh) {
 			vector<byte> temp(imgdata.size());
 			for(int y=0;y<imgh;y++) {
 				int i_in = imgw * 4 * (imgh-1-y);
@@ -117,19 +108,44 @@ namespace ML::image {
 			return temp;
 		}
 
-	public:
-		bool save(string filepath) {
+		static file_image load(string filepath) {
+			file_image image;
+			byte* imgdata = stbi_load(filepath.c_str(), &image.w, &image.h, &image.ch_orig, 4);
+			if(imgdata == NULL) {
+				image.w=0;
+				image.h=0;
+			} else {
+				int size = image.w * image.h * 4;
+				vector<byte> imgdata_loaded(imgdata, imgdata+size);
+				image.data = flip_data_y(imgdata_loaded, image.w, image.h);
+				image.path = filepath;
+			}
+			return image;
+		}
+
+		static bool save(const file_image& image, string filepath, const int num_channels) {
+			// create parent directories as needed.
+			std::error_code ec;
+			fs::path parent_dir = fs::path(filepath).parent_path();
+			fs::create_directories(parent_dir, ec);
+			if(ec) printf("error: %s\n", ec.message().c_str());
+			// write file.
 			bool allowed = utils::file_io::can_write_file(filepath);
 			if(!allowed) return false;
-			int status;
-			utils::file_io::write_file(filepath, status, data.data(), data.size() * sizeof(byte));
-			return status == 0;
+			vector<byte> out_data = flip_data_y(image.data, image.w, image.h);
+			int row_stride_in_bytes = image.w * 4 * sizeof(byte);
+			int success = stbi_write_png(filepath.c_str(), image.w, image.h, num_channels, out_data.data(), row_stride_in_bytes);
+			if(success == 0) {
+				printf("failed to save image: %s\n", filepath.c_str());
+				printf("errno: %s\n", strerror(errno));
+			}
+			return success != 0;
 		}
 	};
 
-	vector<loaded_image> load_images_in_directory(string dir) {
+	vector<file_image> load_images_in_directory(string dir) {
 		// iterate through directory - loading files with recognized exteions.
-		vector<loaded_image> images;
+		vector<file_image> images;
 		vector<string> extensions = { ".png", ".jpg", ".jpeg" };
 		fs::directory_iterator iter(dir);
 		for(const fs::directory_entry entry : iter) {
@@ -139,7 +155,7 @@ namespace ML::image {
 			for(const string& ext : extensions) if(ext.compare(f_ext) == 0) match=true;
 			if(match) {
 				printf("loading image: %s [%s]\n", f_ext.c_str(), f_path.c_str());
-				images.push_back(loaded_image(f_path));
+				images.push_back(file_image::load(f_path));
 			} else {
 				printf("unrecognized extension: %s [%s]\n", f_ext.c_str(), f_path.c_str());
 			}
@@ -147,8 +163,40 @@ namespace ML::image {
 		return images;
 	}
 
-	struct sample_area {
-		int x,y,w,h;
+	struct sample_image {
+		vector<float> data;
+		// dimensions of data.
+		int w = 0;
+		int h = 0;
+		// sample area.
+		int x0 = 0, x1 = 0;
+		int y0 = 0, y1 = 0;
+
+		sample_image(int w, int h) {
+			this->w = w;
+			this->h = h;
+			this->data = vector<float>(w*h*4);
+		}
+
+		void clear() {
+			for(int x=0;x<data.size();x++) data[x] = 1.0f;// TODO TEST - set this to 0
+			x0 = x1 = 0;
+			y0 = y1 = 0;
+		}
+
+		int get_offset(int x, int y) const {
+			return (y*w + x) * 4;
+		}
+
+		file_image to_byte_image() {
+			file_image image;
+			image.data = vector<byte>(data.size());
+			image.w = w;
+			image.h = h;
+			const float m = 255.0f / 1.0f;
+			for(int x=0;x<data.size();x++) image.data[x] = byte(data[x] * m);
+			return image;
+		}
 	};
 
 	/*
@@ -163,36 +211,74 @@ namespace ML::image {
 		values outside the sample area are set to 0 and are ignored
 		when computing error.
 	*/
-	sample_area generate_sample(const loaded_image& image, vector<float>& input_values, const int input_w, const int input_h) {
-		// TODO
-		// - move sampling and float conversion here.
+	void generate_sample(const file_image& image, sample_image& sample) {
+		sample.clear();
+
+		printf("0\n");
+		// if loaded image is smaller than sample area, then copy.
+		if(image.w <= sample.w && image.h <= sample.h) {
+			printf("1\n");
+			int remaining_w = sample.w - image.w;
+			int remaining_h = sample.h - image.h;
+			sample.x0 = remaining_w/2;
+			sample.y0 = remaining_h/2;
+			sample.x1 = sample.x0 + image.w;
+			sample.y1 = sample.y0 + image.h;
+			const float m = 1.0f / 255.0f;
+			for(int y=0;y<image.h;y++) {
+			for(int x=0;x<image.w;x++) {
+				int i_image  = image.get_offset(x, y);
+				int i_sample = sample.get_offset(x+sample.x0, y+sample.y0);
+				for(int c=0;c<4;c++) sample.data[i_sample+c] = float(image.data[i_image+c]) * m;
+			}}
+		}
+
+		// if loaded image is larger than sample area, then scale down.
+		else {
+			printf("A\n");
+			// determine which dimension to scale against.
+			float iw_over_sw = float(image.w) / float(sample.w);
+			float ih_over_sh = float(image.h) / float(sample.h);
+			float scale_factor = 1;
+			printf("B\n");
+			if(iw_over_sw >= ih_over_sh) {
+				// scale to sample width.
+				scale_factor = 1.0f / iw_over_sw;
+				int scaled_h = std::min(int(image.h * scale_factor), sample.h);
+				sample.x0 = 0;
+				sample.x1 = sample.w;
+				int remaining_h = sample.h  - scaled_h;
+				sample.y0 = remaining_h / 2;
+				sample.y1 = (sample.y0 + scaled_h);
+				printf("C\n");
+			} else {
+				// scale to sample height.
+				scale_factor = 1.0f / ih_over_sh;
+				int scaled_w = std::min(int(image.w * scale_factor), sample.w);
+				sample.y0 = 0;
+				sample.y1 = sample.h;
+				int remaining_w = sample.w  - scaled_w;
+				sample.x0 = remaining_w / 2;
+				sample.x1 = (sample.x0 + scaled_w);
+				printf("D\n");
+			}
+			printf("image  area: %i, %i, %i, %i\n", 0, 0, image.w, image.h);
+			printf("sample area: %i, %i, %i, %i\n", sample.x0, sample.y0, sample.x1, sample.y1);
+
+			// sample image data.
+			// METHOD: nearest neighbour - TODO: details are very jagged, switch to 3x3 weighted sum.
+			printf("E\n");
+			const float m = 1.0f / 255.0f;
+			const float inv_scale_factor = 1.0f / scale_factor;
+			for(int y=sample.y0;y<sample.y1;y++) {
+			for(int x=sample.x0;x<sample.x1;x++) {
+				int ix = std::clamp(int(float(x-sample.x0) * inv_scale_factor), 0, image.w);
+				int iy = std::clamp(int(float(y-sample.y0) * inv_scale_factor), 0, image.h);
+				int i_image  = image.get_offset(ix, iy);
+				int i_sample = sample.get_offset(x, y);
+				for(int c=0;c<4;c++) sample.data[i_sample+c] = float(image.data[i_image+c]) * m;
+			}}
+			printf("F\n");
+		}
 	};
-
-
-	// OLD CODE ------------------------------------------------------------
-	// convert bytes to floats.
-	unique_ptr<float[]> image_bytes_to_floats(const unique_ptr<byte[]>& bytes, const int imgw, const int imgh) {
-		const int len = imgw*imgh*4;
-		const float m = 1.0f / 255.0f;
-		unique_ptr<float[]> floats(new float[len]);
-		for(int x=0;x<len;x++) floats[x] = float(bytes[x]) * m;
-		return floats;
-	}
-	// convert floats to bytes.
-	unique_ptr<byte[]> image_floats_to_bytes(const unique_ptr<float[]>& floats, const int imgw, const int imgh) {
-		const int len = imgw*imgh*4;
-		const float m = 255.0f;
-		unique_ptr<byte[]> bytes(new byte[len]);
-		for(int x=0;x<len;x++) bytes[x] = byte(floats[x] * m);
-		return bytes;
-	}
-
-	// samples individual pixels from input image.
-	void sample_1x1(const unique_ptr<float[]>& imgdata, const int imgw, const int imgh) {
-		//TODO
-		// NOTE: remember to set active sample area as well.
-	}
-	// samples individual pixels from input image.
-	void sample_3x3_weighted_sum() {}//TODO
-
 }
