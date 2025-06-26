@@ -180,7 +180,7 @@ namespace ML::image {
 		}
 
 		void clear() {
-			for(int x=0;x<data.size();x++) data[x] = 1.0f;// TEST TODO - revert this back to 0
+			for(int x=0;x<data.size();x++) data[x] = 0.0f;
 			x0 = x1 = 0;
 			y0 = y1 = 0;
 		}
@@ -232,7 +232,6 @@ namespace ML::image {
 			int i1;// index of end   pixel in sample.
 			float f0;// amount of pixel-area covered on i0 side of integer coordinate boundary.
 			float f1;// amount of pixel-area covered on i1 side of integer coordinate boundary.
-			bool intersects_multiple;// true if this intersects multiple pixels.
 		};
 		vector<pixel_fraction> fractions_x(image.w);
 		vector<pixel_fraction> fractions_y(image.h);
@@ -243,11 +242,9 @@ namespace ML::image {
 			int i0 = pf.i0 = std::floor(p0);
 			int i1 = pf.i1 = std::floor(p1);
 			if(i0 == i1) {
-				pf.intersects_multiple = false;
 				pf.f0 = mx;
 				pf.f1 = 0;
 			} else {
-				pf.intersects_multiple = true;
 				pf.f0 = float(i1) - p0;
 				pf.f1 = p1 - float(i1);
 			}
@@ -260,11 +257,9 @@ namespace ML::image {
 			int i0 = pf.i0 = std::floor(p0);
 			int i1 = pf.i1 = std::floor(p1);
 			if(i0 == i1) {
-				pf.intersects_multiple = false;
 				pf.f0 = my;
 				pf.f1 = 0;
 			} else {
-				pf.intersects_multiple = true;
 				pf.f0 = float(i1) - p0;
 				pf.f1 = p1 - float(i1);
 			}
@@ -281,15 +276,15 @@ namespace ML::image {
 		for(int x=0;x<image.w;x++) {
 			// get pixel colour.
 			float clr[4];// colour of this image-pixel.
-			for(int c=0;c<4;c++) clr[c] = image.data[image.get_offset(x, y) + c];
+			for(int c=0;c<4;c++) clr[c] = image_data[image.get_offset(x, y) + c];
 			// determine which sample-pixels the image-pixel intersects.
 			const pixel_fraction& pfx = fractions_x[x];
 			const pixel_fraction& pfy = fractions_y[y];
-			bool p00 = true;
-			bool p10 = pfx.intersects_multiple;
-			bool p01 = pfy.intersects_multiple;
-			bool p11 = p10 & p01;
 			// add pixel colours based on sample-pixel-area covered by image-pixel.
+			bool p00 = true;
+			bool p10 = pfx.i1 != pfx.i0;
+			bool p01 = pfy.i1 != pfy.i0;
+			bool p11 = p10 && p01;
 			if(p00) {
 				int ofs = sample.get_offset(pfx.i0, pfy.i0);
 				float area = pfx.f0 * pfy.f0;
@@ -311,6 +306,13 @@ namespace ML::image {
 				for(int c=0;c<4;c++) sample.data[ofs+c] += clr[c]*area;
 			}
 		}}
+
+		// clamp sample image colours.
+		// sometimes colour values get slightly out of range due to loss-of-precision.
+		for(int x=0;x<sample.data.size();x++) if(sample.data[x] > 1.0f || sample.data[x] < 0.0f) {
+			//printf("pixel value out of bounds: %f\n", sample.data[x]);
+			sample.data[x] = std::clamp(sample.data[x], 0.0f, 1.0f);
+		}
 	}
 
 	/*
