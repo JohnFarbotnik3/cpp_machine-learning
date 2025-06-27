@@ -107,10 +107,16 @@ void training_cycle(
 	}
 }
 
-void print_model_parameter_percentiles(ML::models::autoencoder& model) {
+void print_training_stats(ML::models::autoencoder& model, ML::stats::training_stats& stats) {
 	const vector<int> percentiles { 0, 1, 3, 10, 25, 50, 75, 90, 97, 99, 100 };
-	ML::stats::print_percentiles_header(percentiles, "%", "%i", 12);
+	const int FIRST_COLUMN_WIDTH = 20;
+	const int COLUMN_WIDTH = 12;
+	ML::stats::print_percentiles_header(percentiles, "%", "%i", COLUMN_WIDTH, FIRST_COLUMN_WIDTH);
 	vector<float> biases;
+	printf("STATS\n");
+	for(const auto& [name, vec] : stats.groups) {
+		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, vec);
+	}
 	printf("BIASES\n");
 	for(int x=0;x<model.layers.size();x++) {
 		char buf[64];
@@ -119,7 +125,7 @@ void print_model_parameter_percentiles(ML::models::autoencoder& model) {
 		const auto& layer = model.layers[x];
 		biases.resize(layer.neurons.size());
 		for(int x=0;x<biases.size();x++) biases[x] = layer.neurons[x].bias;
-		ML::stats::print_percentiles(percentiles, name, "%.4f", 12, biases);
+		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, biases);
 	}
 	vector<float> weights;
 	printf("WEIGHTS\n");
@@ -130,7 +136,7 @@ void print_model_parameter_percentiles(ML::models::autoencoder& model) {
 		const auto& layer = model.layers[x];
 		weights.resize(layer.targets.size());
 		for(int x=0;x<weights.size();x++) weights[x] = layer.targets[x].weight;
-		ML::stats::print_percentiles(percentiles, name, "%.4f", 12, weights);
+		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, weights);
 	}
 }
 
@@ -173,25 +179,25 @@ int main(const int argc, const char** argv) {
 
 	// train model.
 	printf("starting training.\n");
-	printf("==============================\n");
-	print_model_parameter_percentiles(model);
-	printf("------------------------------\n");
 	ML::stats::training_stats stats;
 	std::mt19937 gen32 = utils::random::get_generator_32(seed);
-	for(int z=1;z<=n_training_cycles;z++) {
+	for(int z=0;z<n_training_cycles;z++) {
 		// run training batch.
 		printf("training cycle: %i / %i.\n", z, n_training_cycles);
 		training_cycle(model, stats, image_entries, output_dir, minibatch_size, learning_rate, gen32);
 		// print stats.
 		if(z % training_print_itv == 0) {
 			printf("==============================\n");
-			stats.print_all();
+			print_training_stats(model, stats);
 			stats.clear_all();
-			print_model_parameter_percentiles(model);
 			printf("------------------------------\n");
 		}
 	}
 	printf("done training.\n");
+	printf("==============================\n");
+	print_training_stats(model, stats);
+	stats.clear_all();
+	printf("------------------------------\n");
 
 	// test model by outputting images.
 	printf("outputting decoded images.\n");

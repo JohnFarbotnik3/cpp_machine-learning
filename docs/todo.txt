@@ -63,9 +63,9 @@ as in theory we would be storing both the image embedding-vector and original im
 
 
 > todo - debug autoencoder.
-* add config file parsing (newline delimited KEY=VALUE pairs).
+- add config file parsing (newline delimited KEY=VALUE pairs).
+- move stats to percentile print function, and rename to print_stats.
 - figure out why outputs are too bright.
-
 
 
 

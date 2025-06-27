@@ -56,7 +56,7 @@ namespace ML::networks {
 			now using ReLU with leakage.
 			//return std::max<float>(value, 0);
 			*/
-			return value > 0.0f ? value : value*0.1f;
+			return value > 0.0f ? value : value * 0.5f;
 		}
 
 		float activation_derivative(float value) {
@@ -69,7 +69,7 @@ namespace ML::networks {
 			the signal_error_term hits zero the neuron stops learning.
 			//return value > 0.0f ? 1.0f : 0.0f;
 			*/
-			return value > 0.0f ? 1.0f : 0.1f;
+			return value > 0.0f ? 1.0f : 0.5f;
 		}
 
 		// ============================================================
