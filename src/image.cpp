@@ -36,6 +36,13 @@ namespace ML::image {
 		}
 	};
 
+	int get_image_data_offset(int image_w, int image_h, int x, int y) {
+		return (y * image_w + x) * 4;
+	}
+	int get_image_data_length(int image_w, int image_h) {
+		return image_w * image_h * 4;
+	}
+
 	vector<int> generate_image_data_indices(int image_w, int image_h, int x, int y, int w, int h, int channel=-1) {
 		// clip to image area.
 		int x0 = std::max(x, 0);
@@ -366,9 +373,14 @@ namespace ML::image {
 	};
 
 	void generate_error_image(const sample_image& input, const sample_image& output, sample_image& error) {
-		for(int x=0;x<error.data.size();x++) {
-			error.data[x] = input.data[x] - output.data[x];
-		}
+		for(int y=input.y0;y<input.y1;y++) {
+		for(int x=input.x0;x<input.x1;x++) {
+			int ofs = input.get_offset(x, y);
+			for(int c=0;c<4;c++) {
+				int i = ofs+c;
+				error.data[i] = input.data[i] - output.data[i];
+			}
+		}}
 	}
 }
 

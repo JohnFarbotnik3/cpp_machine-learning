@@ -97,21 +97,21 @@ namespace ML::models {
 
 			// create output layer.
 			layer_network output_layer;
-			output_layer.neurons.resize(odim.w * odim.h * 4);
+			output_layer.neurons.resize(ML::image::get_image_data_length(odim.w, odim.h));
 
 			// for each pixel-value in output...
 			for(int y=0;y<odim.h;y++) {
 			for(int x=0;x<odim.w;x++) {
 			for(int c=0;c<4;c++) {
 				// get tile coordinates.
-				int tx = odim.w / B;
-				int ty = odim.h / A;
+				int tx = x / B;
+				int ty = y / B;
 				// get input area.
 				int in_x0 = tx * A;
 				int in_y0 = ty * A;
 				vector<int> connection_inds = ML::image::generate_image_data_indices(idim.w, idim.h, in_x0, in_y0, A, A, mix_channels ? -1 : c);
 				// update neuron.
-				layer_neuron& neuron = output_layer.neurons[(y*odim.w + x)*4 + c];
+				layer_neuron& neuron = output_layer.neurons[ML::image::get_image_data_offset(odim.w, odim.h, x, y) + c];
 				neuron.targets_len = connection_inds.size();
 				neuron.targets_ofs = output_layer.targets.size();
 				// add connections.
@@ -139,29 +139,31 @@ namespace ML::models {
 			image_dimensions out_dim(0, 0);
 
 			// mix and condense image.
-			// (w, h) -> (w/64, h/64)
+			// (w, h) -> (w/32, h/32)
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 2, 1, true); in_dim = out_dim;
+			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 2, true); in_dim = out_dim;
+			/*
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 2, true); in_dim = out_dim;
 			push_layer_mix_AxA_to_1x1(in_dim, 7, true);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 8, 4, true); in_dim = out_dim;
 			push_layer_mix_AxA_to_1x1(in_dim, 9, true);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 16, 8, true); in_dim = out_dim;
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 16, 8, true); in_dim = out_dim;
+			//*/
 
 			// middle layer - embedding values will be obtained from this image.
 			middle_layer_index = layers.size();
 
 			// expand back to original image.
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 8, 16, true); in_dim = out_dim;
+			/*
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 8, 16, true); in_dim = out_dim;
 			push_layer_mix_AxA_to_1x1(in_dim, 9, true);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 8, true); in_dim = out_dim;
 			push_layer_mix_AxA_to_1x1(in_dim, 7, true);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 2, 4, true); in_dim = out_dim;
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 1, 2, true); in_dim = out_dim;
+			//*/
+			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 2, 4, true); in_dim = out_dim;
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 
 			assert(out_dim.w == input_w);

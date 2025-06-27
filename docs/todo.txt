@@ -63,15 +63,14 @@ as in theory we would be storing both the image embedding-vector and original im
 
 
 > todo - run autoencoder.
-- run autoencoder in commandline first, doing N prop-backprop cycles,
-logging total-output-error, and outputting some RGBA images along the way.
-? also make sure to verify autoencoder topology by
-sampling some neurons & connections from various layers to check their input-coordinates.
-
-
-
-
-
+! save images and logs!!!
+x problem: mixing layers seem to work by after a single encode-decode layer-pair,
+	all the images seem to blend into the same image.
+	(something may be wrong with topology?)
+x sometimes training goes from looking good to instant NaNs.
+	figure out source of NaNs!
+x figure out why model converges slowly than suddenly begins to (and continues to) diverge.
+^ generate (and print) a per-layer histogram of neuron biases and weights.
 
 
 

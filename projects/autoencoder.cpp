@@ -14,13 +14,14 @@ run:
 ./projects/autoencoder.elf -m MODELS_DIR -i INPUT_IMAGES_DIR -o OUTPUT_IMAGES_DIR
 ./projects/autoencoder.elf \
 	-m ./data/models \
-	-i ./data/images/images_0 \
-	-o ./data/output/images_0 \
+	-i ./data/images/images_02 \
+	-o ./data/output/images_02 \
 	-w 512 \
 	-h 512 \
-	-tc 100 \
+	-tc 200 \
 	-tcp 10 \
-	-lr 0.05 \
+	-bsz 5 \
+	-lr 0.01 \
 	-seed 12345
 
 */
@@ -84,15 +85,14 @@ void training_cycle(
 			stats.push_value("dt propagate", t1.delta_us(t0));
 
 			// compute error.
-			// TODO: error is not computed properly, only sample area should be taken into account!
 			t0 = timepoint::now();
 			ML::image::generate_error_image(image_input, image_output, image_error);
 			float avg_error = 0;
-			for(int x=0;x<image_error.data.size();x++) avg_error += image_error.data[x];
+			for(int x=0;x<image_error.data.size();x++) avg_error += std::abs(image_error.data[x]);
 			avg_error /= image_error.data.size();
 			t1 = timepoint::now();
 			stats.push_value("dt error", t1.delta_us(t0));
-			stats.push_value("avg error", t1.delta_us(t0));
+			stats.push_value("avg error", avg_error);
 
 			// backpropagate.
 			t0 = timepoint::now();
@@ -101,7 +101,7 @@ void training_cycle(
 			stats.push_value("dt backprop", t1.delta_us(t0));
 		}
 		// adjust model.
-		model.apply_batch_error(learning_rate);
+		model.apply_batch_error(learning_rate / minibatch.size());
 	}
 }
 
@@ -128,6 +128,7 @@ int main(const int argc, const char** argv) {
 	int input_h = arguments.get_named_value("-h", 512);
 	int n_training_cycles = arguments.get_named_value("-tc", 20);
 	int training_print_itv = arguments.get_named_value("-tcp", 1);
+	int minibatch_size = arguments.get_named_value("-bsz", 5);
 	float learning_rate = arguments.get_named_value("-lr", 0.001f);
 	int seed = arguments.get_named_value("-seed", 12345);
 
@@ -144,7 +145,6 @@ int main(const int argc, const char** argv) {
 	// train model.
 	printf("starting training.\n");
 	ML::stats::training_stats stats;
-	int minibatch_size = 5;
 	std::mt19937 gen32 = utils::random::get_generator_32(seed);
 	for(int z=1;z<=n_training_cycles;z++) {
 		// run training batch.
