@@ -6,7 +6,7 @@ namespace ML::networks {
 		virtual void apply_batch_error(float rate) {}
 
 		/* run forward-propagation in the network. */
-		virtual void propagate(std::vector<float>& input_values, std::vector<float>& output_values) {}
+		virtual void propagate(const std::vector<float>& input_values, std::vector<float>& output_values) {}
 
 		/* randomly modify model parameters. */
 		//virtual void anneal(float rate);

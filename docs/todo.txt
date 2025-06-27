@@ -62,18 +62,9 @@ as in theory we would be storing both the image embedding-vector and original im
 
 
 
-> todo - run autoencoder.
-! save images and logs!!!
-x problem: mixing layers seem to work by after a single encode-decode layer-pair,
-	all the images seem to blend into the same image.
-	(something may be wrong with topology?)
-x sometimes training goes from looking good to instant NaNs.
-	figure out source of NaNs!
-x figure out why model converges slowly than suddenly begins to (and continues to) diverge.
-^ generate (and print) a per-layer histogram of neuron biases and weights.
-^ generate images during training (currently they are only generated after training is done).
-^ also generate normalized images of midlayer-activations.
-
+> todo - debug autoencoder.
+* add config file parsing (newline delimited KEY=VALUE pairs).
+- figure out why outputs are too bright.
 
 
 

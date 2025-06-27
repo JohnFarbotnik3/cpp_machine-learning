@@ -10,6 +10,7 @@
 /*
 build:
 g++ -std=c++23 -O2 -o "./projects/autoencoder.elf" "./projects/autoencoder.cpp"
+g++ -std=c++23 -O2 -march=native -o "./projects/autoencoder.elf" "./projects/autoencoder.cpp"
 
 run:
 ./projects/autoencoder.elf -m MODELS_DIR -i INPUT_IMAGES_DIR -o OUTPUT_IMAGES_DIR
@@ -110,6 +111,7 @@ void print_model_parameter_percentiles(ML::models::autoencoder& model) {
 	const vector<int> percentiles { 0, 1, 3, 10, 25, 50, 75, 90, 97, 99, 100 };
 	ML::stats::print_percentiles_header(percentiles, "%", "%i", 12);
 	vector<float> biases;
+	printf("BIASES\n");
 	for(int x=0;x<model.layers.size();x++) {
 		char buf[64];
 		int len = snprintf(buf, 64, "layer %i", x);
@@ -117,9 +119,10 @@ void print_model_parameter_percentiles(ML::models::autoencoder& model) {
 		const auto& layer = model.layers[x];
 		biases.resize(layer.neurons.size());
 		for(int x=0;x<biases.size();x++) biases[x] = layer.neurons[x].bias;
-		ML::stats::print_percentiles(percentiles, "B "+name, "%.4f", 12, biases);
+		ML::stats::print_percentiles(percentiles, name, "%.4f", 12, biases);
 	}
 	vector<float> weights;
+	printf("WEIGHTS\n");
 	for(int x=0;x<model.layers.size();x++) {
 		char buf[64];
 		int len = snprintf(buf, 64, "layer %i", x);
@@ -127,7 +130,7 @@ void print_model_parameter_percentiles(ML::models::autoencoder& model) {
 		const auto& layer = model.layers[x];
 		weights.resize(layer.targets.size());
 		for(int x=0;x<weights.size();x++) weights[x] = layer.targets[x].weight;
-		ML::stats::print_percentiles(percentiles, "W "+name, "%.4f", 12, weights);
+		ML::stats::print_percentiles(percentiles, name, "%.4f", 12, weights);
 	}
 }
 
@@ -170,6 +173,9 @@ int main(const int argc, const char** argv) {
 
 	// train model.
 	printf("starting training.\n");
+	printf("==============================\n");
+	print_model_parameter_percentiles(model);
+	printf("------------------------------\n");
 	ML::stats::training_stats stats;
 	std::mt19937 gen32 = utils::random::get_generator_32(seed);
 	for(int z=1;z<=n_training_cycles;z++) {
@@ -178,9 +184,11 @@ int main(const int argc, const char** argv) {
 		training_cycle(model, stats, image_entries, output_dir, minibatch_size, learning_rate, gen32);
 		// print stats.
 		if(z % training_print_itv == 0) {
+			printf("==============================\n");
 			stats.print_all();
 			stats.clear_all();
 			print_model_parameter_percentiles(model);
+			printf("------------------------------\n");
 		}
 	}
 	printf("done training.\n");

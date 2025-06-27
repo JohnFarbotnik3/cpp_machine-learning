@@ -3,6 +3,7 @@
 #include <cassert>
 #include <vector>
 #include "./network.cpp"
+#include "../utils/simd.cpp"
 
 /*
 	fixed networks are assumed to be made of simple layers
@@ -46,15 +47,29 @@ namespace ML::networks {
 		std::vector<target_t>	targets;
 
 		// ============================================================
-		// helpers
+		// activation functions.
 		// ------------------------------------------------------------
 
 		float activation_func(float value) {
-			return std::max<float>(value, 0);
+			/*
+			NOTE: pure ReLU was causing problems.
+			now using ReLU with leakage.
+			//return std::max<float>(value, 0);
+			*/
+			return value > 0.0f ? value : value*0.1f;
 		}
 
 		float activation_derivative(float value) {
-			return 1.0f;
+			/*
+			NOTE: I deliberately picked 1.0f as the derivative before as I was
+			worried that weights wouldnt be pushed back up if values got stuck in the negatives.
+			this was stupid (I didnt pay close attention to the math), and it caused model degeneration.
+			//return 1.0f;
+			NOTE: maybe I was right, model seems to get stuck, and when
+			the signal_error_term hits zero the neuron stops learning.
+			//return value > 0.0f ? 1.0f : 0.0f;
+			*/
+			return value > 0.0f ? 1.0f : 0.1f;
 		}
 
 		// ============================================================
@@ -64,8 +79,8 @@ namespace ML::networks {
 		void apply_batch_error(float rate) override {
 			// TODO TEST - troubleshoot learning problems.
 			const float BIAS_LIMIT = 3.0f;
-			const float BIAS_RATE = 0;
-			const float WEIGHT_LIMIT = 10.0f;
+			const float BIAS_RATE = 1.0f;
+			const float WEIGHT_LIMIT = 100.0f;
 			const float WEIGHT_RATE = 1.0f;
 			const float ADJUSTMENT_LIMIT = 0.5f;
 			for(int n=0;n<neurons.size();n++) {
@@ -82,7 +97,7 @@ namespace ML::networks {
 			}
 		}
 
-		void propagate(std::vector<float>& input_values, std::vector<float>& output_values) override {
+		void propagate(const std::vector<float>& input_values, std::vector<float>& output_values) override {
 			// compute activations.
 			for(int n=0;n<neurons.size();n++) {
 				neuron_t& neuron = neurons[n];
@@ -111,17 +126,19 @@ namespace ML::networks {
 			for(int n=0;n<neurons.size();n++) {
 				neuron_t& neuron = neurons[n];
 				const float signal_error_term = output_error[n] * activation_derivative(neuron.signal);
+				const float mult = 1.0f / neuron.targets_len;
 				neuron.bias_error += signal_error_term;
 				for(int i=0;i<neuron.targets_len;i++) {
 					target_t& target = targets[neuron.targets_ofs + i];
-					target.weight_error += signal_error_term * input_values[target.index];
-					input_error[target.index] += signal_error_term * target.weight;
+					target.weight_error += signal_error_term * input_values[target.index] * mult;
+					input_error[target.index] += signal_error_term * target.weight * mult;
 				}
 			}
 
 			// WARNING: it seems like error is becoming concentrated on a few neurons.
 			// TODO - fix this
 			// normalize input-error against output-error to have same average gradient per-neuron.
+			/*
 			const float DECAY_FACTOR = 0.9f;// TODO TEST
 			float in_sum = 0;
 			float out_sum = 0;
@@ -130,6 +147,7 @@ namespace ML::networks {
 			float mult = (out_sum / in_sum) * (float(input_error.size()) / float(output_error.size())) * DECAY_FACTOR;
 			assert(in_sum > 0.0f);
 			for(int x=0;x< input_error.size();x++) input_error[x] *= mult;
+			*/
 			// TEST
 			/*
 			float norm_in_sum = 0;
