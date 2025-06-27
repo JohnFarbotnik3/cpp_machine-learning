@@ -71,7 +71,8 @@ x sometimes training goes from looking good to instant NaNs.
 	figure out source of NaNs!
 x figure out why model converges slowly than suddenly begins to (and continues to) diverge.
 ^ generate (and print) a per-layer histogram of neuron biases and weights.
-
+^ generate images during training (currently they are only generated after training is done).
+^ also generate normalized images of midlayer-activations.
 
 
 

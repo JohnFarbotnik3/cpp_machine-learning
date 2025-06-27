@@ -3,6 +3,7 @@
 #include "../src/image.cpp"
 #include "../src/stats.cpp"
 #include "../src/models/autoencoder.cpp"
+#include <cstdio>
 #include <filesystem>
 #include <string>
 
@@ -105,6 +106,31 @@ void training_cycle(
 	}
 }
 
+void print_model_parameter_percentiles(ML::models::autoencoder& model) {
+	const vector<int> percentiles { 0, 1, 3, 10, 25, 50, 75, 90, 97, 99, 100 };
+	ML::stats::print_percentiles_header(percentiles, "%", "%i", 12);
+	vector<float> biases;
+	for(int x=0;x<model.layers.size();x++) {
+		char buf[64];
+		int len = snprintf(buf, 64, "layer %i", x);
+		string name = string(buf, len);
+		const auto& layer = model.layers[x];
+		biases.resize(layer.neurons.size());
+		for(int x=0;x<biases.size();x++) biases[x] = layer.neurons[x].bias;
+		ML::stats::print_percentiles(percentiles, "B "+name, "%.4f", 12, biases);
+	}
+	vector<float> weights;
+	for(int x=0;x<model.layers.size();x++) {
+		char buf[64];
+		int len = snprintf(buf, 64, "layer %i", x);
+		string name = string(buf, len);
+		const auto& layer = model.layers[x];
+		weights.resize(layer.targets.size());
+		for(int x=0;x<weights.size();x++) weights[x] = layer.targets[x].weight;
+		ML::stats::print_percentiles(percentiles, "W "+name, "%.4f", 12, weights);
+	}
+}
+
 int main(const int argc, const char** argv) {
 	// parse arguments.
 	const utils::commandline::cmd_arguments arguments(argc, argv);
@@ -154,6 +180,7 @@ int main(const int argc, const char** argv) {
 		if(z % training_print_itv == 0) {
 			stats.print_all();
 			stats.clear_all();
+			print_model_parameter_percentiles(model);
 		}
 	}
 	printf("done training.\n");

@@ -1,7 +1,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstdio>
 #include <vector>
 #include "./network.cpp"
 
