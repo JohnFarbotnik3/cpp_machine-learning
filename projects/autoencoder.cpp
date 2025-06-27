@@ -47,13 +47,19 @@ void training_cycle(
 	float learning_rate,
 	std::mt19937& gen32
 ) {
-	// divide entries into batches.
-	int n_batches = 1 + (image_entries.size() / minibatch_size);
-	vector<vector<fs::directory_entry>> image_minibatches(n_batches);
-	std::uniform_int_distribution<int> distr(0, n_batches-1);
-	for(const auto entry : image_entries) {
-		int x = distr(gen32);
-		image_minibatches[x].push_back(entry);
+	// divide image entries into batches.
+	vector<fs::directory_entry> pool = image_entries;
+	vector<vector<fs::directory_entry>> image_minibatches;
+	while(pool.size() > 0) {
+		vector<fs::directory_entry> minibatch;
+		for(int z=0;z<minibatch_size;z++) {
+			std::uniform_int_distribution<int> distr(0, pool.size()-1);
+			int x = distr(gen32);
+			minibatch.push_back(pool[x]);
+			pool[x] = pool[pool.size()-1];
+			pool.pop_back();
+		}
+		image_minibatches.push_back(minibatch);
 	}
 
 	// run training cycle.
@@ -63,6 +69,7 @@ void training_cycle(
 	ML::image::sample_image image_temp  (model.input_w, model.input_h);
 	for(const auto& minibatch : image_minibatches) {
 		// run minibatch.
+		assert(minibatch.size() > 0);
 		for(const auto& entry : minibatch) {
 			using timepoint = ML::stats::timepoint;
 			timepoint t0;
