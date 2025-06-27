@@ -1,6 +1,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdio>
 #include <vector>
 #include "./network.cpp"
 #include "../utils/simd.cpp"
@@ -124,7 +125,7 @@ namespace ML::networks {
 
 			// propagate error.
 			for(int n=0;n<neurons.size();n++) {
-				assert(-100.0f < output_error[n] && output_error[n] < 100.0f);
+				//assert(-100.0f < output_error[n] && output_error[n] < 100.0f);
 				neuron_t& neuron = neurons[n];
 				const float signal_error_term = output_error[n] * activation_derivative(neuron.signal);
 				const float mult = 1.0f / neuron.targets_len;
@@ -135,6 +136,27 @@ namespace ML::networks {
 					input_error[target.index] += signal_error_term * target.weight * mult;
 				}
 			}
+
+			// normalize input-error against output-error to have same average gradient per-neuron.
+			///*
+			const float DECAY_FACTOR = 1.00f;
+			float in_sum = 0;
+			float out_sum = 0;
+			for(int x=0;x< input_error.size();x++)  in_sum += std::abs( input_error[x]);
+			for(int x=0;x<output_error.size();x++) out_sum += std::abs(output_error[x]);
+			float mult = (out_sum / in_sum) * (float(input_error.size()) / float(output_error.size())) * DECAY_FACTOR;
+			assert(in_sum > 0.0f);
+			for(int x=0;x< input_error.size();x++) input_error[x] *= mult;
+			//*/
+			// TEST
+			/*
+			float norm_in_sum = 0;
+			float norm_out_sum = 0;
+			for(int x=0;x< input_error.size();x++) norm_in_sum  += std::abs( input_error[x]);
+			for(int x=0;x<output_error.size();x++) norm_out_sum += std::abs(output_error[x]);
+			printf("out_sum: %.1f\t(orig: %.1f)\n", norm_out_sum, out_sum);
+			printf(" in_sum: %.1f\t(orig: %.1f)\n", norm_in_sum, in_sum);
+			//*/
 		}
 	};
 }

@@ -51,21 +51,8 @@ as it gives clues about what the layer is for, as well as hinting at preferred m
 ...
 
 
-
-* create a logistics structure to pass into propagate() and backpropagate()
-to collection (and visualize) information about the training process.
-
-> training note - image output error:
-- when generating output_error, area outside the image will be ignored (error=0),
-as in theory we would be storing both the image embedding-vector and original image metadata.
-
-
-
-
 > todo - debug autoencoder.
 - add config file parsing (newline delimited KEY=VALUE pairs).
-- move stats to percentile print function, and rename to print_stats.
-- figure out why outputs are too bright.
-
+- implement adaptive learning rate (based on avg_error).
 
 
