@@ -1,4 +1,7 @@
 
+#ifndef F_image
+#define F_image
+
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
@@ -33,19 +36,6 @@ namespace ML::image {
 		}
 	};
 
-	struct image_dimensions {
-		int w;// layer width.
-		int h;// layer height.
-		image_dimensions() = default;
-		image_dimensions(int w, int h) {
-			this->w = w;
-			this->h = h;
-		}
-		int  get_area() const { return w*h; }
-		int  get_index(int x, int y) const { return x*h + y; }
-		bool in_bounds(int x, int y) const { return (0 <= x) & (x < w) & (0 <= y) & (y < h); }
-	};
-
 	vector<int> generate_image_data_indices(int image_w, int image_h, int x, int y, int w, int h, int channel=-1) {
 		// clip to image area.
 		int x0 = std::max(x, 0);
@@ -55,19 +45,23 @@ namespace ML::image {
 		// generate indices.
 		vector<int> list;
 		for(int py=y0;py<y1;py++) {
-			for(int px=x0;px<x1;px++) {
-				if(channel == -1) {
-					int i = ((py*image_w) + px) * 4;
-					list.push_back(i+0);
-					list.push_back(i+1);
-					list.push_back(i+2);
-					list.push_back(i+3);
-				} else {
-					int i = ((py*image_w) + px) * 4 + channel;
-					list.push_back(i);
-				}
-			}}
-			return list;
+		for(int px=x0;px<x1;px++) {
+			int i = ((py*image_w) + px) * 4;
+			if(channel == -1) {
+				list.push_back(i+0);
+				list.push_back(i+1);
+				list.push_back(i+2);
+				list.push_back(i+3);
+			} else {
+				list.push_back(i+channel);
+			}
+		}}
+		// assert that all indices are within image bounds.
+		// WARNING: this doesnt necessarily mean they are correct.
+		for(int x=0;x<list.size();x++) {
+			assert(0 <= list[x] && list[x] < (image_w*image_h*4));
+		}
+		return list;
 	}
 
 	/*
@@ -117,6 +111,7 @@ namespace ML::image {
 				vector<byte> imgdata_loaded(imgdata, imgdata+size);
 				image.data = flip_data_y(imgdata_loaded, image.w, image.h);
 				image.path = filepath;
+				delete[] imgdata;
 			}
 			return image;
 		}
@@ -327,7 +322,7 @@ namespace ML::image {
 		values outside the sample area are set to 0 and are ignored
 		when computing error.
 	*/
-	void generate_sample(const file_image& image, sample_image& sample) {
+	void generate_sample_image(const file_image& image, sample_image& sample) {
 		sample.clear();
 
 		// if loaded image is smaller than sample area, then copy.
@@ -369,4 +364,12 @@ namespace ML::image {
 			sample_area_minify_WxH_linear(image, sample);
 		}
 	};
+
+	void generate_error_image(const sample_image& input, const sample_image& output, sample_image& error) {
+		for(int x=0;x<error.data.size();x++) {
+			error.data[x] = input.data[x] - output.data[x];
+		}
+	}
 }
+
+#endif

@@ -1,5 +1,6 @@
 
 #include <algorithm>
+#include <cassert>
 #include <vector>
 #include "./network.cpp"
 
@@ -18,12 +19,6 @@ namespace ML::networks {
 		float bias_error= 0;// cumulative adjustment to apply to bias.
 		int targets_len	= 0;// number of input targets.
 		int targets_ofs	= 0;// start position of input-targets list.
-
-		layer_neuron() = default;
-		layer_neuron(int len, int ofs) {
-			this->targets_len = len;
-			this->targets_ofs = ofs;
-		}
 	};
 
 	struct layer_target {
@@ -93,7 +88,14 @@ namespace ML::networks {
 			}
 		}
 
-		void back_propagate(std::vector<float>& output_error, std::vector<float>& input_error, std::vector<float>& input_values) override {
+		void back_propagate(
+			std::vector<float>& output_error,
+			std::vector<float>& input_error,
+			std::vector<float>& input_values
+		) override {
+			assert(output_error.size() == neurons.size());
+			assert(input_error.size() == input_values.size());
+
 			// clear input error.
 			for(int x=0;x<input_error.size();x++) input_error[x] = 0;
 

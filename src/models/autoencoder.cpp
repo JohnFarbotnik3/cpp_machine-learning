@@ -12,19 +12,25 @@ namespace ML::models {
 
 	struct autoencoder {
 
-		image_dimensions input_dimensions;
+		int input_w;
+		int input_h;
 		int middle_layer_index;
 		vector<layer_network>	layers;
-		vector<image_dimensions>layer_dims;		// dimensions of layer outputs.
 		vector<vector<float>>	layer_values;	// values output by layers - in row-major-RGBA format.
 		vector<vector<float>>	layer_errors;	// errors output by layers.
 
-		autoencoder(image_dimensions input_dimensions) {
-			this->input_dimensions = input_dimensions;
+		autoencoder(int w, int h) {
+			this->input_w = w;
+			this->input_h = h;
 			init_model_topology();
 		}
 
 	private:
+		struct image_dimensions {
+			int w;
+			int h;
+		};
+
 		/*
 			generates connections from AxA square of pixels (from input)
 			to 1x1 square (in output), with AxA input square centered on output pixel.
@@ -37,27 +43,29 @@ namespace ML::models {
 			- if mix_channels is false, channels are kept seperate.
 		*/
 		void push_layer_mix_AxA_to_1x1(const image_dimensions dim, const int A, bool mix_channels) {
-			// for each pixel-value in output...
+			// create output layer.
 			layer_network output_layer;
+			output_layer.neurons.resize(dim.w * dim.h * 4);
+
+			// for each pixel-value in output...
 			for(int y=0;y<dim.h;y++) {
 			for(int x=0;x<dim.w;x++) {
 			for(int c=0;c<4;c++) {
 				int in_x0 = x - A/2;
 				int in_y0 = y - A/2;
 				vector<int> connection_inds = ML::image::generate_image_data_indices(dim.w, dim.h, in_x0, in_y0, A, A, mix_channels ? -1 : c);
-				// add neuron.
-				int len = connection_inds.size();
-				int ofs = output_layer.targets.size();
-				output_layer.neurons.push_back(layer_neuron(len, ofs));
+				// update neuron.
+				layer_neuron& neuron = output_layer.neurons[(y*dim.w + x)*4 + c];
+				neuron.targets_len = connection_inds.size();
+				neuron.targets_ofs = output_layer.targets.size();
 				// add connections.
 				for(int ci : connection_inds) output_layer.targets.push_back(ci);
 			}}}
 
 			// push layer into list.
 			layers.push_back(output_layer);
-			layer_dims.push_back(dim);
-			layer_values.push_back(vector<float>(dim.get_area()));
-			layer_errors.push_back(vector<float>(dim.get_area()));
+			layer_values.push_back(vector<float>(output_layer.neurons.size()));
+			layer_errors.push_back(vector<float>(output_layer.neurons.size()));
 		}
 
 		/*
@@ -80,15 +88,18 @@ namespace ML::models {
 				(idim.w * B) / A,
 				(idim.h * B) / A
 			);
-			assert(idim.w % A != 0);
-			assert(idim.h % A != 0);
-			assert(odim.w % B != 0);
-			assert(odim.h % B != 0);
+			assert(idim.w % A == 0);
+			assert(idim.h % A == 0);
+			assert(odim.w % B == 0);
+			assert(odim.h % B == 0);
 			assert(idim.w / A == odim.w / B);
 			assert(idim.h / A == odim.h / B);
 
-			// for each pixel-value in output...
+			// create output layer.
 			layer_network output_layer;
+			output_layer.neurons.resize(odim.w * odim.h * 4);
+
+			// for each pixel-value in output...
 			for(int y=0;y<odim.h;y++) {
 			for(int x=0;x<odim.w;x++) {
 			for(int c=0;c<4;c++) {
@@ -99,19 +110,18 @@ namespace ML::models {
 				int in_x0 = tx * A;
 				int in_y0 = ty * A;
 				vector<int> connection_inds = ML::image::generate_image_data_indices(idim.w, idim.h, in_x0, in_y0, A, A, mix_channels ? -1 : c);
-				// add neuron.
-				int len = connection_inds.size();
-				int ofs = output_layer.targets.size();
-				output_layer.neurons.push_back(layer_neuron(len, ofs));
+				// update neuron.
+				layer_neuron& neuron = output_layer.neurons[(y*odim.w + x)*4 + c];
+				neuron.targets_len = connection_inds.size();
+				neuron.targets_ofs = output_layer.targets.size();
 				// add connections.
 				for(int ci : connection_inds) output_layer.targets.push_back(ci);
 			}}}
 
 			// push layer into list.
 			layers.push_back(output_layer);
-			layer_dims.push_back(odim);
-			layer_values.push_back(vector<float>(odim.get_area()));
-			layer_errors.push_back(vector<float>(odim.get_area()));
+			layer_values.push_back(vector<float>(output_layer.neurons.size()));
+			layer_errors.push_back(vector<float>(output_layer.neurons.size()));
 		}
 
 		/*
@@ -121,20 +131,18 @@ namespace ML::models {
 		void init_model_topology() {
 			// clear.
 			layers.clear();
-			layer_dims.clear();
 			layer_values.clear();
 			layer_errors.clear();
 
 			// input.
-			// W x H x 4 image (r,g,b,a) - 4 colour channels are treated as 2x2 square.
-			image_dimensions  in_dim = image_dimensions(input_dimensions.w * 2, input_dimensions.h * 2);
+			image_dimensions  in_dim = image_dimensions(input_w, input_h);
 			image_dimensions out_dim(0, 0);
 
 			// mix and condense image.
 			// (w, h) -> (w/64, h/64)
-			push_layer_mix_AxA_to_1x1(in_dim, 3, true);
+			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 2, 1, true); in_dim = out_dim;
-			push_layer_mix_AxA_to_1x1(in_dim, 5, true);
+			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 2, true); in_dim = out_dim;
 			push_layer_mix_AxA_to_1x1(in_dim, 7, true);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 8, 4, true); in_dim = out_dim;
@@ -152,9 +160,12 @@ namespace ML::models {
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 8, true); in_dim = out_dim;
 			push_layer_mix_AxA_to_1x1(in_dim, 7, true);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 2, 4, true); in_dim = out_dim;
-			push_layer_mix_AxA_to_1x1(in_dim, 5, true);
+			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 1, 2, true); in_dim = out_dim;
-			push_layer_mix_AxA_to_1x1(in_dim, 3, true);
+			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
+
+			assert(out_dim.w == input_w);
+			assert(out_dim.h == input_h);
 		}
 
 	public:
@@ -170,11 +181,17 @@ namespace ML::models {
 			}
 		}
 
+		void apply_batch_error(float rate) {
+			for(int x=0;x<layers.size();x++) layers[x].apply_batch_error(rate);
+		}
+
 		void propagate(std::vector<float>& input_values, std::vector<float>& output_values) {
 			// first layer.
 			layers[0].propagate(input_values, layer_values[0]);
 			// middle layers.
-			for(int z=1;z<layer_values.size();z++) layers[z].propagate(layer_values[z-1], layer_values[z]);
+			for(int z=1;z<layer_values.size();z++) {
+				layers[z].propagate(layer_values[z-1], layer_values[z]);
+			}
 			// copy output.
 			output_values = layer_values[layer_values.size()-1];
 		}

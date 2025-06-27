@@ -60,22 +60,13 @@ to collection (and visualize) information about the training process.
 as in theory we would be storing both the image embedding-vector and original image metadata.
 
 
-> todo: config + image loading
-- pass config filepath by commandline argument.
-- put images in test input directory and make sure SOIL can load them properly
-(sanity check by getting average RGBA of some test images)
+
+
+> todo - run autoencoder.
 - run autoencoder in commandline first, doing N prop-backprop cycles,
 logging total-output-error, and outputting some RGBA images along the way.
 ? also make sure to verify autoencoder topology by
 sampling some neurons & connections from various layers to check their input-coordinates.
-
-
-
-
-> write an image sampler which takes an image and samples pixels from it to create
-a smaller image that is suitable for training with.
-* for scaling images to fit sample area, it makes more sense to do the scaling in advance
-since good scaling algorithms are far more expensive than nearest neighbour.
 
 
 
