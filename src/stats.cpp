@@ -49,6 +49,17 @@ namespace ML::stats {
 		}
 	};
 
+	vector<float> get_percentile_values(const vector<int>& percentiles, const vector<float> values) {
+		vector<float> sorted = values;
+		std::sort(sorted.begin(), sorted.end());
+		vector<float> pct_values(percentiles.size());
+		for(int x=0;x<percentiles.size();x++) {
+			size_t index = std::clamp<size_t>((sorted.size() * percentiles[x]) / 100, 0, sorted.size()-1);
+			pct_values[x] = sorted[index];
+		}
+		return pct_values;
+	}
+
 	void print_percentiles_header(const vector<int>& percentiles, string name, string fmt, int column_width, int first_column_width) {
 		printf("PERCENTILES:\n");
 		{
@@ -64,16 +75,13 @@ namespace ML::stats {
 
 	void print_percentiles(const vector<int>& percentiles, string name, string fmt, int column_width, int first_column_width, vector<float> values) {
 		if(values.size() < 1) return;
-		vector<float> sorted = values;
-		std::sort(sorted.begin(), sorted.end());
 		{
 			string str = utils::string_manip::get_padded_number_string("%s", name.c_str(), first_column_width, false);
 			printf("%s", str.c_str());
 		}
+		const vector<float> pct_values = get_percentile_values(percentiles, values);
 		for(int x=0;x<percentiles.size();x++) {
-			int pct = percentiles[x];
-			size_t index = std::clamp<size_t>((sorted.size() * pct) / 100, 0, sorted.size()-1);
-			string str = utils::string_manip::get_padded_number_string(fmt, sorted[index], column_width, true);
+			string str = utils::string_manip::get_padded_number_string(fmt, pct_values[x], column_width, true);
 			printf("%s", str.c_str());
 		}
 		printf("\n");

@@ -39,10 +39,9 @@ void print_usage(string msg) {
 }
 
 void training_cycle(
+	const vector<fs::directory_entry>& image_entries,
 	ML::models::autoencoder& model,
 	ML::stats::training_stats& stats,
-	vector<fs::directory_entry>& image_entries,
-	string output_dir,
 	int minibatch_size,
 	float learning_rate,
 	std::mt19937& gen32
@@ -111,6 +110,58 @@ void training_cycle(
 		}
 		// adjust model.
 		model.apply_batch_error(learning_rate / minibatch.size());
+	}
+}
+
+void update_learning_rate(
+	const vector<fs::directory_entry>& image_entries,
+	ML::models::autoencoder& model,
+	ML::stats::training_stats& stats,
+	int minibatch_size,
+	float& learning_rate,
+	std::mt19937& gen32,
+	int cycles
+) {
+	ML::stats::training_stats stats_0;
+	ML::stats::training_stats stats_1;
+	ML::stats::training_stats stats_2;
+	float lr_0 = learning_rate / 1.2f;
+	float lr_1 = learning_rate * 1.0f;
+	float lr_2 = learning_rate * 1.2f;
+	ML::models::autoencoder model_0 = model;
+	ML::models::autoencoder model_1 = model;
+	ML::models::autoencoder model_2 = model;
+	std::mt19937 gen32_0 = gen32;
+	std::mt19937 gen32_1 = gen32;
+	std::mt19937 gen32_2 = gen32;
+	printf("trying rate = %f\n", lr_0);
+	for(int x=0;x<cycles;x++) training_cycle(image_entries, model_0, stats_0, minibatch_size, lr_0, gen32_0);
+	printf("trying rate = %f\n", lr_1);
+	for(int x=0;x<cycles;x++) training_cycle(image_entries, model_1, stats_1, minibatch_size, lr_1, gen32_1);
+	printf("trying rate = %f\n", lr_2);
+	for(int x=0;x<cycles;x++) training_cycle(image_entries, model_2, stats_2, minibatch_size, lr_2, gen32_2);
+	const vector<int> percentiles { 20 };
+	float pct_error_0 = ML::stats::get_percentile_values(percentiles, stats_0.groups.at("avg error"))[0];
+	float pct_error_1 = ML::stats::get_percentile_values(percentiles, stats_1.groups.at("avg error"))[0];
+	float pct_error_2 = ML::stats::get_percentile_values(percentiles, stats_2.groups.at("avg error"))[0];
+	float lowest_error = std::min(std::min(pct_error_0, pct_error_1), pct_error_2);
+	if(lowest_error == pct_error_0) {
+		learning_rate = lr_0;
+		model = model_0;
+		stats = stats_0;
+		gen32 = gen32_0;
+	}
+	if(lowest_error == pct_error_1) {
+		learning_rate = lr_1;
+		model = model_1;
+		stats = stats_1;
+		gen32 = gen32_1;
+	}
+	if(lowest_error == pct_error_2) {
+		learning_rate = lr_2;
+		model = model_2;
+		stats = stats_2;
+		gen32 = gen32_2;
 	}
 }
 
@@ -191,13 +242,20 @@ int main(const int argc, const char** argv) {
 	for(int z=0;z<n_training_cycles;z++) {
 		// run training batch.
 		printf("training cycle: %i / %i.\n", z, n_training_cycles);
-		training_cycle(model, stats, image_entries, output_dir, minibatch_size, learning_rate, gen32);
+		training_cycle(image_entries, model, stats, minibatch_size, learning_rate, gen32);
 		// print stats.
 		if(z % training_print_itv == 0) {
 			printf("==============================\n");
 			print_training_stats(model, stats);
 			stats.clear_all();
 			printf("------------------------------\n");
+		}
+		// update learning rate.
+		if(z % 50 == 0) {
+			printf("updating learning rate:\n");
+			update_learning_rate(image_entries, model, stats, minibatch_size, learning_rate, gen32, 10);
+			printf("new learning rate: %f\n", learning_rate);
+			z += 10;
 		}
 	}
 	printf("done training.\n");
