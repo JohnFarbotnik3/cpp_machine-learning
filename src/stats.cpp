@@ -70,6 +70,7 @@ namespace ML::stats {
 			string str = utils::string_manip::get_padded_number_string(fmt, percentiles[x], column_width, true);
 			printf("%s", str.c_str());
 		}
+		printf(" COUNT");
 		printf("\n");
 	}
 
@@ -84,6 +85,7 @@ namespace ML::stats {
 			string str = utils::string_manip::get_padded_number_string(fmt, pct_values[x], column_width, true);
 			printf("%s", str.c_str());
 		}
+		printf(" %lu", values.size());
 		printf("\n");
 	}
 };

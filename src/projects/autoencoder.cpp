@@ -1,30 +1,29 @@
-#include "../src/utils/commandline.cpp"
-#include "../src/utils/random.cpp"
-#include "../src/image.cpp"
-#include "../src/stats.cpp"
-#include "../src/models/autoencoder.cpp"
+#include "../utils/commandline.cpp"
+#include "../utils/random.cpp"
+#include "../image.cpp"
+#include "../stats.cpp"
+#include "../models/autoencoder.cpp"
 #include <cstdio>
 #include <filesystem>
 #include <string>
 
 /*
 build:
-g++ -std=c++23 -O2 -o "./projects/autoencoder.elf" "./projects/autoencoder.cpp"
-g++ -std=c++23 -O2 -march=native -o "./projects/autoencoder.elf" "./projects/autoencoder.cpp"
+g++ -std=c++23 -O2 -o "./src/projects/autoencoder.elf" "./src/projects/autoencoder.cpp"
+g++ -std=c++23 -O2 -march=native -o "./src/projects/autoencoder.elf" "./src/projects/autoencoder.cpp"
 
 run:
-./projects/autoencoder.elf -m MODELS_DIR -i INPUT_IMAGES_DIR -o OUTPUT_IMAGES_DIR
-./projects/autoencoder.elf \
-	-m ./data/models \
-	-i ./data/images/images_02 \
-	-o ./data/output/images_02 \
-	-w 512 \
-	-h 512 \
-	-tc 200 \
-	-tcp 10 \
-	-bsz 5 \
-	-lr 0.01 \
-	-seed 12345
+./src/projects/autoencoder.elf \
+-m ./data/models \
+-i ./data/images/images_02 \
+-o ./data/output/images_02 \
+-w 512 \
+-h 512 \
+-tc 500 \
+-tcp 10 \
+-bsz 5 \
+-lr 0.02 \
+-seed 12345
 
 */
 
@@ -165,16 +164,25 @@ void update_learning_rate(
 	}
 }
 
-void print_training_stats(ML::models::autoencoder& model, ML::stats::training_stats& stats) {
+void print_training_stats(ML::stats::training_stats& stats) {
 	const vector<int> percentiles { 0, 1, 3, 10, 25, 50, 75, 90, 97, 99, 100 };
 	const int FIRST_COLUMN_WIDTH = 20;
 	const int COLUMN_WIDTH = 12;
 	ML::stats::print_percentiles_header(percentiles, "%", "%i", COLUMN_WIDTH, FIRST_COLUMN_WIDTH);
-	vector<float> biases;
+
 	printf("STATS\n");
 	for(const auto& [name, vec] : stats.groups) {
 		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, vec);
 	}
+}
+
+void print_model_parameters(ML::models::autoencoder& model) {
+	const vector<int> percentiles { 0, 1, 3, 10, 25, 50, 75, 90, 97, 99, 100 };
+	const int FIRST_COLUMN_WIDTH = 20;
+	const int COLUMN_WIDTH = 12;
+	ML::stats::print_percentiles_header(percentiles, "%", "%i", COLUMN_WIDTH, FIRST_COLUMN_WIDTH);
+
+	vector<float> biases;
 	printf("BIASES\n");
 	for(int x=0;x<model.layers.size();x++) {
 		char buf[64];
@@ -185,6 +193,7 @@ void print_training_stats(ML::models::autoencoder& model, ML::stats::training_st
 		for(int x=0;x<biases.size();x++) biases[x] = layer.neurons[x].bias;
 		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, biases);
 	}
+
 	vector<float> weights;
 	printf("WEIGHTS\n");
 	for(int x=0;x<model.layers.size();x++) {
@@ -192,8 +201,19 @@ void print_training_stats(ML::models::autoencoder& model, ML::stats::training_st
 		int len = snprintf(buf, 64, "layer %i", x);
 		string name = string(buf, len);
 		const auto& layer = model.layers[x];
-		weights.resize(layer.targets.size());
-		for(int x=0;x<weights.size();x++) weights[x] = layer.targets[x].weight;
+		weights.resize(layer.foreward_targets.targets.size());
+		for(int x=0;x<weights.size();x++) weights[x] = layer.foreward_targets.targets[x].weight;
+		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, weights);
+	}
+
+	printf("BACKPROP WEIGHTS (should match WEIGHTS)\n");
+	for(int x=0;x<model.layers.size();x++) {
+		char buf[64];
+		int len = snprintf(buf, 64, "layer %i", x);
+		string name = string(buf, len);
+		const auto& layer = model.layers[x];
+		weights.resize(layer.backprop_targets.targets.size());
+		for(int x=0;x<weights.size();x++) weights[x] = layer.backprop_targets.targets[x].weight;
 		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, weights);
 	}
 }
@@ -234,6 +254,9 @@ int main(const int argc, const char** argv) {
 	printf("initializing model.\n");
 	ML::models::autoencoder model(input_w, input_h);
 	model.init_model_parameters(seed, 0.0f, 0.3f, 0.0f, 0.2f);
+	printf("==============================\n");
+	print_model_parameters(model);
+	printf("------------------------------\n");
 
 	// train model.
 	printf("starting training.\n");
@@ -246,7 +269,7 @@ int main(const int argc, const char** argv) {
 		// print stats.
 		if(z % training_print_itv == 0) {
 			printf("==============================\n");
-			print_training_stats(model, stats);
+			print_training_stats(stats);
 			stats.clear_all();
 			printf("------------------------------\n");
 		}
@@ -260,7 +283,8 @@ int main(const int argc, const char** argv) {
 	}
 	printf("done training.\n");
 	printf("==============================\n");
-	print_training_stats(model, stats);
+	print_training_stats(stats);
+	print_model_parameters(model);
 	stats.clear_all();
 	printf("------------------------------\n");
 

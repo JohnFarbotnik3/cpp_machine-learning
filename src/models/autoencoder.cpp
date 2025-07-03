@@ -1,14 +1,160 @@
 
 #include <cassert>
 #include <vector>
-#include "../networks/layer.cpp"
-#include "../utils/random.cpp"
+#include <algorithm>
+#include "./network.cpp"
 #include "../image.cpp"
+#include "../target_list.cpp"
+#include "../utils/random.cpp"
+#include "../utils/simd.cpp"
 
 namespace ML::models {
 	using std::vector;
-	using namespace ML::networks;
 	using namespace ML::image;
+
+	using namespace target_list;
+
+	struct layer_neuron {
+		float signal 	= 0;// sum of input activations and bias - used for backpropagation.
+		float bias		= 0;// bias of neuron[x] in the network.
+		float bias_error= 0;// cumulative adjustment to apply to bias.
+	};
+
+	/*
+	 a * single layer network of forward-connected neurons.
+	 NOTE: this network is intended to be populated externally.
+	 */
+	struct layer_network : ML::models::network {
+		std::vector<layer_neuron> neurons;
+		foreward_target_list foreward_targets;
+		backprop_target_list backprop_targets;// inverse of this layer's foreward_targets.
+
+		// ============================================================
+		// activation functions.
+		// ------------------------------------------------------------
+
+		float activation_func(float value) {
+			/*
+			 * NOTE: pure ReLU was causing problems.
+			 * now using ReLU with leakage.
+			 * //return std::max<float>(value, 0);
+			 */
+			return value > 0.0f ? value : value * 0.5f;
+		}
+
+		float activation_derivative(float value) {
+			/*
+			 * NOTE: I deliberately picked 1.0f as the derivative before as I was
+			 * worried that weights wouldnt be pushed back up if values got stuck in the negatives.
+			 * this was stupid (I didnt pay close attention to the math), and it caused model degeneration.
+			 * //return 1.0f;
+			 * NOTE: maybe I was right, model seems to get stuck, and when
+			 * the signal_error_term hits zero the neuron stops learning.
+			 * //return value > 0.0f ? 1.0f : 0.0f;
+			 */
+			return value > 0.0f ? 1.0f : 0.5f;
+		}
+
+		// ============================================================
+		// network functions
+		// ------------------------------------------------------------
+
+		void apply_batch_error(float rate) override {
+			const float BIAS_LIMIT = 3.0f;
+			const float BIAS_RATE = 1.0f;
+			const float WEIGHT_LIMIT = 100.0f;
+			const float WEIGHT_RATE = 1.0f;
+			const float ADJUSTMENT_LIMIT = 0.5f;
+			for(int n=0;n<neurons.size();n++) {
+				layer_neuron& neuron = neurons[n];
+				neuron.bias += std::clamp(neuron.bias_error * rate, -ADJUSTMENT_LIMIT, +ADJUSTMENT_LIMIT) * BIAS_RATE;
+				neuron.bias  = std::clamp(neuron.bias, -BIAS_LIMIT, +BIAS_LIMIT);
+				neuron.bias_error = 0;
+			}
+			for(int x=0;x<backprop_targets.targets.size();x++) {
+				backprop_target& bt = backprop_targets.targets[x];
+				bt.weight += std::clamp(bt.weight_error * rate, -ADJUSTMENT_LIMIT, ADJUSTMENT_LIMIT) * WEIGHT_RATE;
+				bt.weight  = std::clamp(bt.weight, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
+				bt.weight_error = 0;
+			}
+			foreward_targets.load_weights(backprop_targets);
+		}
+
+		void propagate(const std::vector<float>& input_values, std::vector<float>& output_values) override {
+			// compute activations.
+			for(int n=0;n<neurons.size();n++) {
+				layer_neuron& neuron = neurons[n];
+				float sum = neuron.bias;
+				const target_itv itv = foreward_targets.get_interval(n);
+				for(int i=itv.beg;i<itv.end;i++) {
+					const foreward_target& target = foreward_targets.targets[i];
+					sum += target.weight * input_values[target.index];
+				}
+				neuron.signal = sum;
+				output_values[n] = activation_func(sum);
+			}
+		}
+
+		/*
+			for backprop derivation, see:
+			https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
+		*/
+		void back_propagate(
+			std::vector<float>& output_error,
+			std::vector<float>& input_error,
+			std::vector<float>& input_values
+		) override {
+			assert(output_error.size() == neurons.size());
+			assert( input_error.size() == input_values.size());
+			assert(output_error.size() > 0);
+			assert( input_error.size() > 0);
+
+			// compute signal error terms of output neurons.
+			std::vector<float> signal_error_terms(neurons.size());
+			for(int n=0;n<neurons.size();n++) {
+				const float signal_error_term = output_error[n] * activation_derivative(neurons[n].signal);
+				signal_error_terms[n] = signal_error_term;
+				neurons[n].bias_error += signal_error_term;
+			}
+
+			// back propagate input error.
+			for(int n=0;n<input_error.size();n++) {
+				const target_itv itv = backprop_targets.get_interval(n);
+				const float value = input_values[n];
+				const float mult = 1.0f / (itv.end - itv.beg);
+				float input_error_sum = 0;
+				for(int x=itv.beg;x<itv.end;x++) {
+					backprop_target& bt = backprop_targets.targets[x];
+					const float signal_error_term = signal_error_terms[bt.neuron_index];
+					input_error_sum += signal_error_term * bt.weight * mult;
+					bt.weight_error += signal_error_term * value * mult;
+				}
+				input_error[n] = input_error_sum;
+			}
+
+			// normalize input-error against output-error to have same average gradient per-neuron.
+			///*
+			const float DECAY_FACTOR = 1.00f;
+			float in_sum = 0;
+			float out_sum = 0;
+			for(int x=0;x< input_error.size();x++)  in_sum += std::abs( input_error[x]);
+			for(int x=0;x<output_error.size();x++) out_sum += std::abs(output_error[x]);
+			float mult = (out_sum / in_sum) * (float(input_error.size()) / float(output_error.size())) * DECAY_FACTOR;
+			assert(out_sum > 0.0f);
+			assert(in_sum > 0.0f);
+			for(int x=0;x< input_error.size();x++) input_error[x] *= mult;
+			//*/
+			// TEST
+			/*
+			 * float norm_in_sum = 0;
+			 * float norm_out_sum = 0;
+			 * for(int x=0;x< input_error.size();x++) norm_in_sum  += std::abs( input_error[x]);
+			 * for(int x=0;x<output_error.size();x++) norm_out_sum += std::abs(output_error[x]);
+			 * printf("out_sum: %.1f\t(orig: %.1f)\n", norm_out_sum, out_sum);
+			 * printf(" in_sum: %.1f\t(orig: %.1f)\n", norm_in_sum, in_sum);
+			 * //*/
+		}
+	};
 
 	struct autoencoder {
 
@@ -31,6 +177,12 @@ namespace ML::models {
 			int h;
 		};
 
+		void push_output_layer(const layer_network& output_layer) {
+			layers.push_back(output_layer);
+			layer_values.push_back(vector<float>(output_layer.neurons.size()));
+			layer_errors.push_back(vector<float>(output_layer.neurons.size()));
+		}
+
 		/*
 			generates connections from AxA square of pixels (from input)
 			to 1x1 square (in output), with AxA input square centered on output pixel.
@@ -43,29 +195,24 @@ namespace ML::models {
 			- if mix_channels is false, channels are kept seperate.
 		*/
 		void push_layer_mix_AxA_to_1x1(const image_dimensions dim, const int A, bool mix_channels) {
-			// create output layer.
+			// create output layer and generate targets for each neuron (pixel-value) in output.
+			// NOTE: the order these target-lists are generated in must match order of neurons.
 			layer_network output_layer;
-			output_layer.neurons.resize(dim.w * dim.h * 4);
-
-			// for each pixel-value in output...
+			output_layer.neurons.resize(ML::image::get_image_data_length(dim.w, dim.h));
 			for(int y=0;y<dim.h;y++) {
 			for(int x=0;x<dim.w;x++) {
 			for(int c=0;c<4;c++) {
 				int in_x0 = x - A/2;
 				int in_y0 = y - A/2;
 				vector<int> connection_inds = ML::image::generate_image_data_indices(dim.w, dim.h, in_x0, in_y0, A, A, mix_channels ? -1 : c);
-				// update neuron.
-				layer_neuron& neuron = output_layer.neurons[(y*dim.w + x)*4 + c];
-				neuron.targets_len = connection_inds.size();
-				neuron.targets_ofs = output_layer.targets.size();
-				// add connections.
-				for(int ci : connection_inds) output_layer.targets.push_back(ci);
+				output_layer.foreward_targets.push_list(connection_inds);
 			}}}
 
+			// generate backprop targets.
+			output_layer.backprop_targets = output_layer.foreward_targets.get_inverse(ML::image::get_image_data_length(dim.w, dim.h));
+
 			// push layer into list.
-			layers.push_back(output_layer);
-			layer_values.push_back(vector<float>(output_layer.neurons.size()));
-			layer_errors.push_back(vector<float>(output_layer.neurons.size()));
+			push_output_layer(output_layer);
 		}
 
 		/*
@@ -95,11 +242,10 @@ namespace ML::models {
 			assert(idim.w / A == odim.w / B);
 			assert(idim.h / A == odim.h / B);
 
-			// create output layer.
+			// create output layer and generate targets for each neuron (pixel-value) in output.
+			// NOTE: the order these target-lists are generated in must match order of neurons.
 			layer_network output_layer;
 			output_layer.neurons.resize(ML::image::get_image_data_length(odim.w, odim.h));
-
-			// for each pixel-value in output...
 			for(int y=0;y<odim.h;y++) {
 			for(int x=0;x<odim.w;x++) {
 			for(int c=0;c<4;c++) {
@@ -110,18 +256,14 @@ namespace ML::models {
 				int in_x0 = tx * A;
 				int in_y0 = ty * A;
 				vector<int> connection_inds = ML::image::generate_image_data_indices(idim.w, idim.h, in_x0, in_y0, A, A, mix_channels ? -1 : c);
-				// update neuron.
-				layer_neuron& neuron = output_layer.neurons[ML::image::get_image_data_offset(odim.w, odim.h, x, y) + c];
-				neuron.targets_len = connection_inds.size();
-				neuron.targets_ofs = output_layer.targets.size();
-				// add connections.
-				for(int ci : connection_inds) output_layer.targets.push_back(ci);
+				output_layer.foreward_targets.push_list(connection_inds);
 			}}}
 
+			// generate backprop targets.
+			output_layer.backprop_targets = output_layer.foreward_targets.get_inverse(ML::image::get_image_data_length(idim.w, idim.h));
+
 			// push layer into list.
-			layers.push_back(output_layer);
-			layer_values.push_back(vector<float>(output_layer.neurons.size()));
-			layer_errors.push_back(vector<float>(output_layer.neurons.size()));
+			push_output_layer(output_layer);
 		}
 
 		/*
@@ -179,7 +321,8 @@ namespace ML::models {
 			for(int z=0;z<layers.size();z++) {
 				auto& layer = layers[z];
 				for(auto& neuron : layer.neurons) neuron.bias = distr_bias(gen32);
-				for(auto& target : layer.targets) target.weight = distr_weight(gen32);
+				for(auto& target : layer.foreward_targets.targets) target.weight = distr_weight(gen32);
+				layer.foreward_targets.store_weights(layer.backprop_targets);
 			}
 		}
 

@@ -1,6 +1,6 @@
 
 #include <vector>
-namespace ML::networks {
+namespace ML::models {
 	struct network {
 		/* adjust weights and biases according to batch loss, then clear accumulated values. */
 		virtual void apply_batch_error(float rate) {}
