@@ -36,7 +36,7 @@ namespace ML::target_list {
 		std::vector<int>		offsets { 0 };
 		std::vector<target_t>	targets;
 
-		target_itv get_interval(int neuron_index) {
+		target_itv get_interval(int neuron_index) const {
 			int beg = offsets[neuron_index];
 			int end = offsets[neuron_index + 1];
 			return target_itv { beg, end };

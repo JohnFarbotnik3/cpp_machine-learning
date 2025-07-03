@@ -51,22 +51,8 @@ as it gives clues about what the layer is for, as well as hinting at preferred m
 ...
 
 
-> optimize autoencoder.
-- add multithreading.
-	^ spawn N threads.
-	^ while end of neurons array not reached, each thread gets next interval to update
-	(advancing shared interval-start position).
-- add backtargets which point to neurons in next layer that read this neuron,
-as well as to links (to get access to weights).
-	^ this will allow safely multithreading backprop as well.
-...
 
 > debug autoencoder.
-- implement adaptive learning rate (try increasing, decreasing, or keeping it the same, then
-go with whichever produces the lowest error);
-	^ this should operate on clones of the base model rather than the model itself.
-	^ this can be implemented by running K training cycles with each setting to see which is the best.
-	^ repeat learning-rate update function every N >> K training cylces.
 - implement model saving and loading (plus a snapshot interval for intermediate model states).
 - check if lowering ReLU leakage speeds of the slow half of the learning process.
 	^ with lower leakage, try higher learning rate?
@@ -74,7 +60,13 @@ go with whichever produces the lowest error);
 - re-add middle layers to fully prove autoencoder effectiveness.
 
 
-- add "training_settings" struct to make training functions simpler / more concise.
+> optimize autoencoder.
+- add multithreading.
+	^ spawn N threads.
+	^ while end of neurons array not reached, each thread gets next interval to update
+	(advancing shared interval-start position).
+* figure out why backprop (specifically the weights part) isnt scaling well with number of threads.
+...
 
 
 

@@ -95,7 +95,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 
 			// propagate.
 			t0 = timepoint::now();
-			model.propagate(image_input.data, image_output.data);
+			model.propagate(settings.n_threads, image_input.data, image_output.data);
 			t1 = timepoint::now();
 			settings.stats.push_value("dt propagate", t1.delta_us(t0));
 
@@ -111,7 +111,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 
 			// backpropagate.
 			t0 = timepoint::now();
-			model.back_propagate(image_error.data, image_temp.data, image_input.data);
+			model.back_propagate(settings.n_threads, image_error.data, image_temp.data, image_input.data);
 			t1 = timepoint::now();
 			settings.stats.push_value("dt backprop", t1.delta_us(t0));
 		}
@@ -286,7 +286,7 @@ int main(const int argc, const char** argv) {
 		// load and propagate.
 		ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string());
 		ML::image::generate_sample_image(loaded_image, image_input);
-		model.propagate(image_input.data, image_output.data);
+		model.propagate(settings.n_threads, image_input.data, image_output.data);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output = image_output.to_byte_image();

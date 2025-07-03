@@ -1,4 +1,7 @@
 
+#ifndef F_stats
+#define F_stats
+
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
@@ -105,3 +108,5 @@ namespace ML::stats {
 		printf("\n");
 	}
 };
+
+#endif

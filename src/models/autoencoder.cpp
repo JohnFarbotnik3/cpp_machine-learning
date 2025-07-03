@@ -1,5 +1,6 @@
 
 #include <cassert>
+#include <thread>
 #include <vector>
 #include <algorithm>
 #include "./network.cpp"
@@ -7,6 +8,7 @@
 #include "../target_list.cpp"
 #include "../utils/random.cpp"
 #include "../utils/simd.cpp"
+#include "../stats.cpp"
 
 namespace ML::models {
 	using std::vector;
@@ -33,7 +35,7 @@ namespace ML::models {
 		// activation functions.
 		// ------------------------------------------------------------
 
-		float activation_func(float value) {
+		static float activation_func(float value) {
 			/*
 			 * NOTE: pure ReLU was causing problems.
 			 * now using ReLU with leakage.
@@ -42,7 +44,7 @@ namespace ML::models {
 			return value > 0.0f ? value : value * 0.5f;
 		}
 
-		float activation_derivative(float value) {
+		static float activation_derivative(float value) {
 			/*
 			 * NOTE: I deliberately picked 1.0f as the derivative before as I was
 			 * worried that weights wouldnt be pushed back up if values got stuck in the negatives.
@@ -78,9 +80,23 @@ namespace ML::models {
 			foreward_targets.load_weights(backprop_targets);
 		}
 
-		void propagate(const std::vector<float>& input_values, std::vector<float>& output_values) override {
+		static vector<int> generate_intervals(int n_threads, int length) {
+			vector<int> intervals;
+			for(int x=0;x<n_threads;x++) intervals.push_back(x * (length / n_threads));
+			intervals.push_back(length);
+			return intervals;
+		}
+
+		static void propagate_func(
+			const vector<float>& input_values,
+			vector<float>& output_values,
+			vector<layer_neuron>& neurons,
+			foreward_target_list& foreward_targets,
+			int n_beg,
+			int n_end
+		) {
 			// compute activations.
-			for(int n=0;n<neurons.size();n++) {
+			for(int n=n_beg;n<n_end;n++) {
 				layer_neuron& neuron = neurons[n];
 				float sum = neuron.bias;
 				const target_itv itv = foreward_targets.get_interval(n);
@@ -93,30 +109,50 @@ namespace ML::models {
 			}
 		}
 
-		/*
-			for backprop derivation, see:
-			https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
-		*/
-		void back_propagate(
-			std::vector<float>& output_error,
-			std::vector<float>& input_error,
-			std::vector<float>& input_values
-		) override {
-			assert(output_error.size() == neurons.size());
-			assert( input_error.size() == input_values.size());
-			assert(output_error.size() > 0);
-			assert( input_error.size() > 0);
+		void propagate(const int n_threads, const std::vector<float>& input_values, std::vector<float>& output_values) override {
+			// spawn threads.
+			vector<int> intervals = generate_intervals(n_threads, neurons.size());
+			vector<std::jthread> threads;
+			for(int x=0;x<n_threads;x++) {
+				threads.push_back(std::jthread(
+					propagate_func,
+					std::ref(input_values),
+					std::ref(output_values),
+					std::ref(this->neurons),
+					std::ref(this->foreward_targets),
+					intervals[x],
+					intervals[x+1]
+				));
+			}
+			for(int x=0;x<n_threads;x++) threads[x].join();
+		}
 
+		static void back_propagate_func_0(
+			const vector<float>& output_error,
+			vector<float>& signal_error_terms,
+			vector<layer_neuron>& neurons,
+			int n_beg,
+			int n_end
+		) {
 			// compute signal error terms of output neurons.
-			std::vector<float> signal_error_terms(neurons.size());
-			for(int n=0;n<neurons.size();n++) {
+			for(int n=n_beg;n<n_end;n++) {
 				const float signal_error_term = output_error[n] * activation_derivative(neurons[n].signal);
 				signal_error_terms[n] = signal_error_term;
 				neurons[n].bias_error += signal_error_term;
 			}
+		}
 
+		static void back_propagate_func_1(
+			const vector<float>& output_error,
+			vector<float>& input_error,
+			const vector<float>& input_values,
+			const vector<float>& signal_error_terms,
+			backprop_target_list& backprop_targets,
+			int n_beg,
+			int n_end
+		) {
 			// back propagate input error.
-			for(int n=0;n<input_error.size();n++) {
+			for(int n=n_beg;n<n_end;n++) {
 				const target_itv itv = backprop_targets.get_interval(n);
 				const float value = input_values[n];
 				const float mult = 1.0f / (itv.end - itv.beg);
@@ -129,6 +165,64 @@ namespace ML::models {
 				}
 				input_error[n] = input_error_sum;
 			}
+		}
+
+		/*
+			for backprop derivation, see:
+			https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
+		*/
+		void back_propagate(
+			const int n_threads,
+			std::vector<float>& output_error,
+			std::vector<float>& input_error,
+			std::vector<float>& input_values
+		) override {
+			assert(output_error.size() == neurons.size());
+			assert( input_error.size() == input_values.size());
+			assert(output_error.size() > 0);
+			assert( input_error.size() > 0);
+
+			using timepoint = ML::stats::timepoint;
+			timepoint t0 = timepoint::now();
+
+			// compute signal error terms of output neurons.
+			std::vector<float> signal_error_terms(neurons.size());
+			{
+				vector<int> intervals = generate_intervals(n_threads, neurons.size());
+				vector<std::jthread> threads;
+				for(int x=0;x<n_threads;x++) {
+					threads.push_back(std::jthread(
+						back_propagate_func_0,
+						std::ref(output_error),
+						std::ref(signal_error_terms),
+						std::ref(this->neurons),
+						intervals[x],
+						intervals[x+1]
+					));
+				}
+				for(int x=0;x<n_threads;x++) threads[x].join();
+			}
+			timepoint t1 = timepoint::now();
+
+			// back propagate input error.
+			{
+				vector<int> intervals = generate_intervals(n_threads, input_error.size());
+				vector<std::jthread> threads;
+				for(int x=0;x<n_threads;x++) {
+					threads.push_back(std::jthread(
+						back_propagate_func_1,
+						std::ref(output_error),
+						std::ref(input_error),
+						std::ref(input_values),
+						std::ref(signal_error_terms),
+						std::ref(this->backprop_targets),
+						intervals[x],
+						intervals[x+1]
+					));
+				}
+				for(int x=0;x<n_threads;x++) threads[x].join();
+			}
+			timepoint t2 = timepoint::now();
 
 			// normalize input-error against output-error to have same average gradient per-neuron.
 			///*
@@ -141,20 +235,14 @@ namespace ML::models {
 			assert(out_sum > 0.0f);
 			assert(in_sum > 0.0f);
 			for(int x=0;x< input_error.size();x++) input_error[x] *= mult;
-			//*/
-			// TEST
-			/*
-			 * float norm_in_sum = 0;
-			 * float norm_out_sum = 0;
-			 * for(int x=0;x< input_error.size();x++) norm_in_sum  += std::abs( input_error[x]);
-			 * for(int x=0;x<output_error.size();x++) norm_out_sum += std::abs(output_error[x]);
-			 * printf("out_sum: %.1f\t(orig: %.1f)\n", norm_out_sum, out_sum);
-			 * printf(" in_sum: %.1f\t(orig: %.1f)\n", norm_in_sum, in_sum);
-			 * //*/
+			timepoint t3 = timepoint::now();
+
+			// TEST - print time taken for each part of function.
+			//printf("dt:\t%li\t%li\t%li\n", t1.delta_us(t0), t2.delta_us(t1), t3.delta_us(t2));
 		}
 	};
 
-	struct autoencoder {
+	struct autoencoder : network {
 
 		int input_w;
 		int input_h;
@@ -324,28 +412,28 @@ namespace ML::models {
 			}
 		}
 
-		void apply_batch_error(float rate) {
+		void apply_batch_error(float rate) override {
 			for(int x=0;x<layers.size();x++) layers[x].apply_batch_error(rate);
 		}
 
-		void propagate(std::vector<float>& input_values, std::vector<float>& output_values) {
+		void propagate(const int n_threads, const std::vector<float>& input_values, std::vector<float>& output_values) override {
 			// first layer.
-			layers[0].propagate(input_values, layer_values[0]);
+			layers[0].propagate(n_threads, input_values, layer_values[0]);
 			// middle layers.
 			for(int z=1;z<layer_values.size();z++) {
-				layers[z].propagate(layer_values[z-1], layer_values[z]);
+				layers[z].propagate(n_threads, layer_values[z-1], layer_values[z]);
 			}
 			// copy output.
 			output_values = layer_values[layer_values.size()-1];
 		}
 
-		void back_propagate(std::vector<float>& output_error, std::vector<float>& input_error, std::vector<float>& input_values) {
+		void back_propagate(const int n_threads, std::vector<float>& output_error, std::vector<float>& input_error, std::vector<float>& input_values) override {
 			// copy output.
 			layer_errors[layer_errors.size()-1] = output_error;
 			// middle layers.
-			for(int z=layer_values.size()-1;z>0;z--) layers[z].back_propagate(layer_errors[z], layer_errors[z-1], layer_values[z-1]);
+			for(int z=layer_values.size()-1;z>0;z--) layers[z].back_propagate(n_threads, layer_errors[z], layer_errors[z-1], layer_values[z-1]);
 			// first layer.
-			layers[0].back_propagate(layer_errors[0], input_error, input_values);
+			layers[0].back_propagate(n_threads, layer_errors[0], input_error, input_values);
 		}
 	};
 }
