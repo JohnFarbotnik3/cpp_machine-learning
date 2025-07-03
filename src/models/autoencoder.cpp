@@ -60,23 +60,21 @@ namespace ML::models {
 		// ------------------------------------------------------------
 
 		void apply_batch_error(float rate) override {
-			const float BIAS_LIMIT = 3.0f;
-			const float BIAS_RATE = 1.0f;
+			const float BIAS_LIMIT = 5.0f;
 			const float WEIGHT_LIMIT = 100.0f;
-			const float WEIGHT_RATE = 1.0f;
-			const float ADJUSTMENT_LIMIT = 0.5f;
 			for(int n=0;n<neurons.size();n++) {
 				layer_neuron& neuron = neurons[n];
-				neuron.bias += std::clamp(neuron.bias_error * rate, -ADJUSTMENT_LIMIT, +ADJUSTMENT_LIMIT) * BIAS_RATE;
+				neuron.bias += neuron.bias_error * rate;
 				neuron.bias  = std::clamp(neuron.bias, -BIAS_LIMIT, +BIAS_LIMIT);
 				neuron.bias_error = 0;
 			}
 			for(int x=0;x<backprop_targets.targets.size();x++) {
 				backprop_target& bt = backprop_targets.targets[x];
-				bt.weight += std::clamp(bt.weight_error * rate, -ADJUSTMENT_LIMIT, ADJUSTMENT_LIMIT) * WEIGHT_RATE;
+				bt.weight += bt.weight_error * rate;
 				bt.weight  = std::clamp(bt.weight, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
 				bt.weight_error = 0;
 			}
+			// NOTE: load_weights() is quite expensive.
 			foreward_targets.load_weights(backprop_targets);
 		}
 
@@ -88,7 +86,7 @@ namespace ML::models {
 				const target_itv itv = foreward_targets.get_interval(n);
 				for(int i=itv.beg;i<itv.end;i++) {
 					const foreward_target& target = foreward_targets.targets[i];
-					sum += target.weight * input_values[target.index];
+					sum += target.weight * input_values[target.neuron_index];
 				}
 				neuron.signal = sum;
 				output_values[n] = activation_func(sum);

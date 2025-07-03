@@ -5,14 +5,14 @@ namespace ML::target_list {
 
 	// target pointing to neuron in previous layer, used for foreward-propagation.
 	struct foreward_target {
-		int index		= 0;// index of target neuron.
-		float weight	= 0;
+		int neuron_index	= 0;// index of input neuron.
+		float weight		= 0;
 	};
 
 	// inverse of foreward_target, used for back-propagation.
 	// points to neuron in next layer, as well as its associated foreward_target.
 	struct backprop_target {
-		int neuron_index	= 0;	// index of target neuron.
+		int neuron_index	= 0;	// index of output neuron.
 		int target_index	= 0;	// index of related foreward_target.
 		float weight		= 0;	// copy of weight from corresponding foreward_target.
 		float weight_error	= 0;	// error accumulator (total adjustment to apply to foreward_target weight).
@@ -45,7 +45,7 @@ namespace ML::target_list {
 		void push_list(std::vector<int> src_neuron_indices) {
 			for(int index : src_neuron_indices) {
 				foreward_target ft;
-				ft.index = index;
+				ft.neuron_index = index;
 				targets.push_back(ft);
 			}
 			offsets.push_back(targets.size());
@@ -88,7 +88,7 @@ namespace ML::target_list {
 			// get number of back-targets for each input neuron.
 			std::vector<int> lengths(input_size);
 			for(int x=0;x<input_size;x++) lengths[x] = 0;
-			for(int x=0;x<this->targets.size();x++) lengths[this->targets[x].index]++;
+			for(int x=0;x<this->targets.size();x++) lengths[this->targets[x].neuron_index]++;
 
 			// initialize backprop target list.
 			backprop_target_list list;
@@ -105,7 +105,7 @@ namespace ML::target_list {
 				target_itv itv = this->get_interval(n);
 				for(int x=itv.beg;x<itv.end;x++) {
 					foreward_target& ft = this->targets[x];
-					backprop_target& bt = list.targets[list.offsets[ft.index]++];
+					backprop_target& bt = list.targets[list.offsets[ft.neuron_index]++];
 					bt.neuron_index = n;
 					bt.target_index = x;
 				}

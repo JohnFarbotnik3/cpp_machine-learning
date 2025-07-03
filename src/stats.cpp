@@ -60,7 +60,7 @@ namespace ML::stats {
 		return pct_values;
 	}
 
-	void print_percentiles_header(const vector<int>& percentiles, string name, string fmt, int column_width, int first_column_width) {
+	void print_percentiles_header(const vector<int>& percentiles, string name, string fmt, int column_width, int first_column_width, int sum_column_width) {
 		printf("PERCENTILES:\n");
 		{
 			string str = utils::string_manip::get_padded_number_string("%s", name.c_str(), first_column_width, false);
@@ -70,11 +70,18 @@ namespace ML::stats {
 			string str = utils::string_manip::get_padded_number_string(fmt, percentiles[x], column_width, true);
 			printf("%s", str.c_str());
 		}
-		printf(" COUNT");
+		{
+			string str = utils::string_manip::get_padded_string("COUNT", column_width, true);
+			printf("%s", str.c_str());
+		}
+		{
+			string str = utils::string_manip::get_padded_string("SUM", sum_column_width, true);
+			printf("%s", str.c_str());
+		}
 		printf("\n");
 	}
 
-	void print_percentiles(const vector<int>& percentiles, string name, string fmt, int column_width, int first_column_width, vector<float> values) {
+	void print_percentiles(const vector<int>& percentiles, string name, string fmt, int column_width, int first_column_width, int sum_column_width, vector<float> values) {
 		if(values.size() < 1) return;
 		{
 			string str = utils::string_manip::get_padded_number_string("%s", name.c_str(), first_column_width, false);
@@ -85,7 +92,16 @@ namespace ML::stats {
 			string str = utils::string_manip::get_padded_number_string(fmt, pct_values[x], column_width, true);
 			printf("%s", str.c_str());
 		}
-		printf(" %lu", values.size());
+		{
+			string str = utils::string_manip::get_padded_number_string("%lu", values.size(), column_width, true);
+			printf("%s", str.c_str());
+		}
+		{
+			float sum = 0;
+			for(const float value : values) sum += value;
+			string str = utils::string_manip::get_padded_number_string(fmt, sum, sum_column_width, true);
+			printf("%s", str.c_str());
+		}
 		printf("\n");
 	}
 };

@@ -74,3 +74,7 @@ go with whichever produces the lowest error);
 - re-add middle layers to fully prove autoencoder effectiveness.
 
 
+- add "training_settings" struct to make training functions simpler / more concise.
+
+
+
