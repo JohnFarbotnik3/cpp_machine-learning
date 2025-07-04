@@ -68,10 +68,12 @@ as it gives clues about what the layer is for, as well as hinting at preferred m
 * figure out why backprop (specifically the weights part) isnt scaling well with number of threads.
 	n_threads=1: foreward=60ms, backprop=70ms
 	n_threads=2: foreward=31ms, backprop=57ms
-* running "linux perf" and doing a couple other experiments didnt reveal anything in particular,
+* running "perf" and doing a couple other experiments didnt reveal anything in particular (ex. "false sharing"),
 but I highly suspect that memory bandwidth may be a problem. I may be time to implement
 image tiling iterators meanwhile also implementing images + layer-generation with variable number of channels.
 (this will be an overhaul)
+* NOTE: running "perf record -- COMMAND [OPTIONS...]" then "perf report" can show
+useful information about program hotspots.
 ...
 
 

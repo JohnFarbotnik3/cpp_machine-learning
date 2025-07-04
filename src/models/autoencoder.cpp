@@ -28,6 +28,7 @@ namespace ML::models {
 	 */
 	struct layer_network : ML::models::network {
 		std::vector<layer_neuron> neurons;
+		std::vector<float> signal_error_terms;
 		foreward_target_list foreward_targets;
 		backprop_target_list backprop_targets;// inverse of this layer's foreward_targets.
 
@@ -131,8 +132,8 @@ namespace ML::models {
 			const vector<float>& output_error,
 			vector<float>& signal_error_terms,
 			vector<layer_neuron>& neurons,
-			int n_beg,
-			int n_end
+			const int n_beg,
+			const int n_end
 		) {
 			// compute signal error terms of output neurons.
 			for(int n=n_beg;n<n_end;n++) {
@@ -148,19 +149,23 @@ namespace ML::models {
 			const vector<float>& input_values,
 			const vector<float>& signal_error_terms,
 			backprop_target_list& backprop_targets,
-			int n_beg,
-			int n_end
+			const int n_beg,
+			const int n_end
 		) {
 			// back propagate input error.
 			for(int n=n_beg;n<n_end;n++) {
-				const target_itv itv = backprop_targets.get_interval(n);
-				const float value = input_values[n];
-				const float mult = 1.0f / (itv.end - itv.beg);
 				float input_error_sum = 0;
+				const target_itv itv = backprop_targets.get_interval(n);
+				const float mult = 1.0f / (itv.end - itv.beg);
+				const float value = input_values[n];
 				for(int x=itv.beg;x<itv.end;x++) {
 					backprop_target& bt = backprop_targets.targets[x];
 					const float signal_error_term = signal_error_terms[bt.neuron_index];
 					input_error_sum += signal_error_term * mult * bt.weight;
+				}
+				for(int x=itv.beg;x<itv.end;x++) {
+					backprop_target& bt = backprop_targets.targets[x];
+					const float signal_error_term = signal_error_terms[bt.neuron_index];
 					bt.weight_error += signal_error_term * mult * value;
 				}
 				input_error[n] = input_error_sum;
@@ -186,7 +191,8 @@ namespace ML::models {
 			timepoint t0 = timepoint::now();
 
 			// compute signal error terms of output neurons.
-			std::vector<float> signal_error_terms(neurons.size());
+			//std::vector<float> signal_error_terms(neurons.size());
+			if(signal_error_terms.size() < neurons.size()) signal_error_terms.resize(neurons.size());
 			{
 				vector<int> intervals = generate_intervals(n_threads, neurons.size());
 				vector<std::thread> threads;

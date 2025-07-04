@@ -382,6 +382,155 @@ namespace ML::image {
 			}
 		}}
 	}
+
+	/*
+		a simple iterator for iterating on an image
+		with a variable number of channels.
+	*/
+	struct variable_image_iterator {
+		// image dimensions.
+		int X,Y,C;
+		// current position.
+		int x,y,c;
+		// iterator bounds.
+		int x0,x1;
+		int y0,y1;
+		int c0,c1;
+		// index in image data.
+		int i;
+		// end index.
+		int iend;
+
+		variable_image_iterator(
+			int X, int Y, int C,
+			int x0, int x1,
+			int y0, int y1,
+			int c0, int c1
+		) {
+			this->X = X;
+			this->Y = Y;
+			this->C = C;
+			this->x0 = x0;
+			this->x1 = x1;
+			this->y0 = y0;
+			this->y1 = y1;
+			this->c0 = c0;
+			this->c1 = c1;
+			this->x = x0;
+			this->y = y0;
+			this->c = c0;
+			this->i    = ((y0 * X) + x0) * C + c0;
+			this->iend = ((y1 * X) + x1) * C + c1;
+		}
+
+		bool has_next() {
+			return i < iend;
+		}
+		int length() {
+			return (x1 - x0) * (y1 - y0) * (c1 - c0);
+		}
+		int next() {
+			c++;
+			if(c >= c1) { c=c0; x++; }
+			if(x >= x1) { x=x0; y++; }
+			i = ((y*X) + x)*C + c;
+			return i;
+		}
+	};
+
+	/*
+		iterator for accessing images with a tiled memory layout.
+
+		NOTE: this is an act of desperation to try an fix what
+		seems to be a memory bandwidth issue. hopefully it will improve
+		caching performance considerably.
+	*/
+	struct variable_image_tile_iterator {
+		// image dimensions.
+		int X,Y,C;
+		// current position.
+		int x,y,c;
+		// iterator bounds.
+		int x0,x1;
+		int y0,y1;
+		int c0,c1;
+		// size of each tile.
+		int TX,TY;
+		// current tile bounds.
+		int tx0,tx1;
+		int ty0,ty1;
+		// index in image data.
+		int i;
+		// end index.
+		int iend;
+
+		variable_image_tile_iterator(
+			int X, int Y, int C,
+			int TX, int TY,
+			int x0, int x1,
+			int y0, int y1,
+			int c0, int c1
+		) {
+			this->X = X;
+			this->Y = Y;
+			this->C = C;
+			this->TX = TX;
+			this->TY = TY;
+			this->x0 = x0;
+			this->x1 = x1;
+			this->y0 = y0;
+			this->y1 = y1;
+			this->c0 = c0;
+			this->c1 = c1;
+			this->x = x0;
+			this->y = y0;
+			this->c = c0;
+			this->i    = ((y0 * X) + x0) * C + c0;
+			this->iend = ((y1 * X) + x1) * C + c1;
+		}
+
+		bool has_next() {
+			return i < iend;
+		}
+		int length() {
+			return (x1 - x0) * (y1 - y0) * (c1 - c0);
+		}
+		int next() {
+			c++;
+			if(c >= c1) { c=c0; x++; }
+			if(x >= x1) { x=x0; y++; }
+			i = ((y*X) + x)*C + c;
+			return i;
+		}
+	};
+
+	/*
+		an image with a variable number of channels.
+
+		NOTE: this is intended to be populated externally,
+		either by hand or with the help of image iterators.
+	*/
+	template<class T>
+	struct variable_image {
+		vector<T> data;
+		int X;// width.
+		int Y;// height.
+		int C;// number of channels.
+
+		/* TODO
+		void scale_image_values(T mult) {}
+		*/
+	};
 }
 
 #endif
+
+
+
+
+
+
+
+
+
+

@@ -30,6 +30,8 @@ run:
 
 perf:
 perf stat -d -d -d -- <RUN COMMAND WITH OPTIONS>
+perf record -- COMMAND [OPTIONS...]
+perf report -i "./perf.data"
 
 */
 
