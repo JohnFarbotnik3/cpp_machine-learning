@@ -392,7 +392,7 @@ namespace ML::image {
 		int X,Y,C;
 		// current position.
 		int x,y,c;
-		// iterator bounds.
+		// image bounds - area to iterate through.
 		int x0,x1;
 		int y0,y1;
 		int c0,c1;
@@ -401,6 +401,7 @@ namespace ML::image {
 		// end index.
 		int iend;
 
+		variable_image_iterator() = default;
 		variable_image_iterator(
 			int X, int Y, int C,
 			int x0, int x1,
@@ -424,9 +425,6 @@ namespace ML::image {
 			assert(this->length() > 0);
 		}
 
-		bool has_next() {
-			return i < iend;
-		}
 		int length() {
 			return (x1 - x0) * (y1 - y0) * (c1 - c0);
 		}
@@ -437,10 +435,16 @@ namespace ML::image {
 			i = ((y*X) + x)*C + c;
 			return i;
 		}
+		bool has_next() {
+			return y < y1;
+		}
 	};
 
 	/*
 		iterator for accessing images with a tiled memory layout.
+
+		effectively, the super-image is made of a grid of sub-images,
+		which are themselves made of a grid of pixels.
 
 		NOTE: this is an act of desperation to try an fix what
 		seems to be a memory bandwidth issue. hopefully it will improve
@@ -449,32 +453,26 @@ namespace ML::image {
 	struct variable_image_tile_iterator {
 		// image dimensions.
 		int X,Y,C;
-		// tile dimensions.
-		int TX,TY,TC;
 		// current position.
 		int x,y,c;
-		// origin of current tile in image.
-		int orx,ory,orc;
-		// iterator bounds in image.
+		// image bounds - area to iterate through.
 		int x0,x1;
 		int y0,y1;
 		int c0,c1;
-		// current tile bounds in image.
-		int tx0,tx1;
-		int ty0,ty1;
-		int tc0,tc1;
-		// tile stride in image data - used for computing index.
-		int TILE_STRIDE_X;// TODO
-		int TILE_STRIDE_Y;
-		int TILE_STRIDE_C;
 		// index in image data.
-		int i;// WARNING: index is currently calculated wrong!
-		// end index.
-		int iend;
+		int i;
+		// tile dimensions.
+		int TX,TY,TC;
+		// length of tile in image data.
+		int TILE_LENGTH;
+		// iterates through tiles in the image.
+		variable_image_iterator inner_iterator;
+		// iterates through pixels in the current tile.
+		variable_image_iterator outer_iterator;
 
 		variable_image_tile_iterator(
-			int X, int Y, int C,
 			int TX, int TY, int TC,
+			int X, int Y, int C,
 			int x0, int x1,
 			int y0, int y1,
 			int c0, int c1
@@ -485,6 +483,7 @@ namespace ML::image {
 			this->TX = TX;
 			this->TY = TY;
 			this->TC = TC;
+			TILE_LENGTH = TX * TY * TC;
 			this->x0 = x0;
 			this->x1 = x1;
 			this->y0 = y0;
@@ -494,66 +493,60 @@ namespace ML::image {
 			this->x = x0;
 			this->y = y0;
 			this->c = c0;
-			this->orx = (x0/TX)*TX;
-			this->ory = (y0/TY)*TY;
-			this->orc = (c0/TC)*TC;
-			TILE_STRIDE_C = TX * TY * TC;
-			TILE_STRIDE_X = (C / TC) * TILE_STRIDE_C;
-			TILE_STRIDE_Y = (X / TX) * TILE_STRIDE_X;
-			this->i    = ((y0 * X) + x0) * C + c0;// TODO - fix this!
-			this->iend = ((y1 * X) + x1) * C + c1;// TODO - fix this!
-			update_tile_bounds();
+			setup_outer_iterator();
+			setup_inner_iterator(outer_iterator);
+			this->i = outer_iterator.i * TILE_LENGTH + inner_iterator.i;
 			assert(length() > 0);
-			assert(TX > 0);
-			assert(TY > 0);
-			assert(X % TX == 0);
-			assert(Y % TY == 0);
 		}
 
 		bool has_next() {
-			return i < iend;
+			return inner_iterator.has_next();
 		}
 		int length() {
 			return (x1 - x0) * (y1 - y0) * (c1 - c0);
 		}
 		int next() {
-			c++;
-			if(c >= tc1) { c=tc0; x++; }
-			if(x >= tx1) { x=tx0; y++; }
-			if(y >= ty1) { next_tile(); }
-			i = ((y*X) + x)*C + c;// TODO - fix this!
+			inner_iterator.next();
+			if(!inner_iterator.has_next()) {
+				outer_iterator.next();
+				setup_inner_iterator(outer_iterator);
+			}
+			x = outer_iterator.x * TX + inner_iterator.x;
+			y = outer_iterator.y * TY + inner_iterator.y;
+			c = outer_iterator.c * TC + inner_iterator.c;
+			i = outer_iterator.i * TILE_LENGTH + inner_iterator.i;
 			return i;
 		}
 
 	private:
-		int get_index(int x, int y, int c) {
-			return (
-				(y/TY) * TILE_STRIDE_Y +
-				(x/TX) * TILE_STRIDE_X +
-				(c/TC) * TILE_STRIDE_C +
-				()
+		/*
+			create iterator that iterates through all tiles
+			required to cover image bounds.
+		*/
+		void setup_outer_iterator() {
+			outer_iterator = variable_image_iterator(
+				X/TX, Y/TY, C/TC,
+				x0/TX, x1/TX + (x1%TX != 0 ? 1 : 0),
+				y0/TY, y1/TY + (y1%TY != 0 ? 1 : 0),
+				c0/TC, c1/TC + (c1%TC != 0 ? 1 : 0)
 			);
 		}
+		/*
+			create iterator that iterates through pixels in tile,
+			clamped to image bounds.
 
-		// move cursor to next tile.
-		void next_tile() {
-			orc += TC;
-			if(orc >= C) { orc=(c0/TC)*TC; orx+=TX; }
-			if(orx >= X) { orx=(x0/TX)*TX; ory+=TY; }
-			update_tile_bounds();
-			// move to start of next tile.
-			x = tx0;
-			y = ty0;
-		}
-
-		// clamp tile-bounds to image-bounds of iterator.
-		void update_tile_bounds() {
-			tc0 = std::max(c0, orc);
-			tc1 = std::min(c1, orc + TC);
-			tx0 = std::max(x0, orx);
-			tx1 = std::min(x1, orx + TX);
-			ty0 = std::max(y0, ory);
-			ty1 = std::min(y1, ory + TY);
+			NOTE: this depends on state of outer_iterator.
+		*/
+		void setup_inner_iterator(const variable_image_iterator& outer) {
+			int tx = outer.x * TX;
+			int ty = outer.y * TY;
+			int tc = outer.c * TC;
+			inner_iterator = variable_image_iterator(
+				TX, TY, TC,
+				std::max(0, x0-tx), std::min(TX, x1-tx),
+				std::max(0, y0-ty), std::min(TY, y1-ty),
+				std::max(0, c0-tc), std::min(TC, c1-tc)
+			);
 		}
 	};
 
