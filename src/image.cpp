@@ -36,6 +36,7 @@ namespace ML::image {
 		}
 	};
 
+	/*
 	int get_image_data_offset(int image_w, int image_h, int x, int y) {
 		return (y * image_w + x) * 4;
 	}
@@ -70,6 +71,7 @@ namespace ML::image {
 		}
 		return list;
 	}
+	*/
 
 	/*
 		image containing RGBA byte data loaded from image files.
@@ -81,42 +83,46 @@ namespace ML::image {
 	struct file_image {
 		string path = "";
 		vector<byte> data = vector<byte>(0);
-		int w = 0;
-		int h = 0;
+		int X = 0;
+		int Y = 0;
+		int C = 0;
 		int ch_orig = 0;
+		const int CH_DEFAULT = 4;
 
 		void print() const {
 			printf("<loaded_image>\n");
 			printf("path   : %s\n", path.c_str());
-			printf("area   : %i x %i (%i channels)\n", w, h, ch_orig);
+			printf("area   : %i x %i (%i -> %i channels)\n", X, Y, ch_orig, C);
 			printf("memsize: %.3f MiB\n", float(data.size()*sizeof(byte))/(1024*1024));
 		}
 
-		int get_offset(int x, int y) const {
-			return (y*w + x) * 4;
+		int get_offset(int x, int y, int c) const {
+			return (y*X + x) * C + c;
 		}
 
 		// flip image data in the y-axis.
-		static vector<byte> flip_data_y(const vector<byte>& imgdata, const int imgw, const int imgh) {
+		static vector<byte> flip_data_y(const vector<byte>& imgdata, const int imgw, const int imgh, const int imgch) {
 			vector<byte> temp(imgdata.size());
+			int row_length = imgw * imgch;
 			for(int y=0;y<imgh;y++) {
-				int i_in = imgw * 4 * (imgh-1-y);
-				int i_fl = imgw * 4 * y;
-				memcpy(temp.data() + i_fl, imgdata.data() + i_in, imgw * 4 * sizeof(byte));
+				int i_fl = row_length * y;
+				int i_in = row_length * (imgh-1-y);
+				memcpy(temp.data() + i_fl, imgdata.data() + i_in, row_length * sizeof(byte));
 			}
 			return temp;
 		}
 
 		static file_image load(string filepath) {
 			file_image image;
-			byte* imgdata = stbi_load(filepath.c_str(), &image.w, &image.h, &image.ch_orig, 4);
+			image.C = image.CH_DEFAULT;
+			byte* imgdata = stbi_load(filepath.c_str(), &image.X, &image.Y, &image.ch_orig, image.C);
 			if(imgdata == NULL) {
-				image.w=0;
-				image.h=0;
+				image.X=0;
+				image.Y=0;
 			} else {
-				int size = image.w * image.h * 4;
+				int size = image.X * image.Y * image.C;
 				vector<byte> imgdata_loaded(imgdata, imgdata+size);
-				image.data = flip_data_y(imgdata_loaded, image.w, image.h);
+				image.data = flip_data_y(imgdata_loaded, image.X, image.Y, image.C);
 				image.path = filepath;
 				delete[] imgdata;
 			}
@@ -132,9 +138,9 @@ namespace ML::image {
 			// write file.
 			bool allowed = utils::file_io::can_write_file(filepath);
 			if(!allowed) return false;
-			vector<byte> out_data = flip_data_y(image.data, image.w, image.h);
-			int row_stride_in_bytes = image.w * 4 * sizeof(byte);
-			int success = stbi_write_png(filepath.c_str(), image.w, image.h, num_channels, out_data.data(), row_stride_in_bytes);
+			vector<byte> out_data = flip_data_y(image.data, image.X, image.Y, image.C);
+			int row_length = image.X * image.C;
+			int success = stbi_write_png(filepath.c_str(), image.X, image.Y, num_channels, out_data.data(), row_length * sizeof(byte));
 			if(success == 0) {
 				printf("failed to save image: %s\n", filepath.c_str());
 				printf("errno: %s\n", strerror(errno));
@@ -166,226 +172,12 @@ namespace ML::image {
 		return images;
 	}
 
-	struct sample_image {
-		vector<float> data;
-		// dimensions of data.
-		int w = 0;
-		int h = 0;
-		// sample area.
-		int x0 = 0, x1 = 0;
-		int y0 = 0, y1 = 0;
-
-		sample_image(int w, int h) {
-			this->w = w;
-			this->h = h;
-			this->data = vector<float>(w*h*4);
-		}
-
-		void clear() {
-			for(int x=0;x<data.size();x++) data[x] = 0.0f;
-			x0 = x1 = 0;
-			y0 = y1 = 0;
-		}
-
-		int get_offset(int x, int y) const {
-			return (y*w + x) * 4;
-		}
-
-		file_image to_byte_image() {
-			file_image image;
-			image.data = vector<byte>(data.size());
-			image.w = w;
-			image.h = h;
-			const float m = 255.0f / 1.0f;
-			for(int x=0;x<data.size();x++) image.data[x] = byte(data[x] * m);
-			return image;
-		}
-	};
-
-	void sample_area_copy(const file_image& image, sample_image& sample) {
-		const float m = 1.0f / 255.0f;
-		for(int y=0;y<image.h;y++) {
-		for(int x=0;x<image.w;x++) {
-			int i_image  = image.get_offset(x, y);
-			int i_sample = sample.get_offset(x+sample.x0, y+sample.y0);
-			for(int c=0;c<4;c++) sample.data[i_sample+c] = float(image.data[i_image+c]) * m;
-		}}
-	}
-	void sample_area_minify_1x1_nearest(const file_image& image, sample_image& sample) {
-		const float m = 1.0f / 255.0f;
-		const float x_inv_scale_factor = float(image.w) / float(sample.x1 - sample.x0);
-		const float y_inv_scale_factor = float(image.h) / float(sample.y1 - sample.y0);
-		for(int y=sample.y0;y<sample.y1;y++) {
-		for(int x=sample.x0;x<sample.x1;x++) {
-			int ix = std::clamp(int(float(x-sample.x0) * x_inv_scale_factor), 0, image.w);
-			int iy = std::clamp(int(float(y-sample.y0) * y_inv_scale_factor), 0, image.h);
-			int i_image  = image.get_offset(ix, iy);
-			int i_sample = sample.get_offset(x, y);
-			for(int c=0;c<4;c++) sample.data[i_sample+c] = float(image.data[i_image+c]) * m;
-		}}
-	}
-	void sample_area_minify_WxH_linear(const file_image& image, sample_image& sample) {
-		// compute pixel fractions, i.e. area of sample-pixels that are covered when scaling down image-pixels.
-		// NOTE: these are linearly seperable, and are thus computed seperately for each dimension.
-		float mx = float(sample.x1 - sample.x0) / float(image.w);
-		float my = float(sample.y1 - sample.y0) / float(image.h);
-		struct pixel_fraction {
-			int i0;// index of start pixel in sample.
-			int i1;// index of end   pixel in sample.
-			float f0;// amount of pixel-area covered on i0 side of integer coordinate boundary.
-			float f1;// amount of pixel-area covered on i1 side of integer coordinate boundary.
-		};
-		vector<pixel_fraction> fractions_x(image.w);
-		vector<pixel_fraction> fractions_y(image.h);
-		for(int x=0;x<image.w;x++) {
-			pixel_fraction pf;
-			float p0 = float(x+0) * mx + float(sample.x0);
-			float p1 = float(x+1) * mx + float(sample.x0);
-			int i0 = pf.i0 = std::floor(p0);
-			int i1 = pf.i1 = std::floor(p1);
-			if(i0 == i1) {
-				pf.f0 = mx;
-				pf.f1 = 0;
-			} else {
-				pf.f0 = float(i1) - p0;
-				pf.f1 = p1 - float(i1);
-			}
-			fractions_x[x] = pf;
-		}
-		for(int y=0;y<image.h;y++) {
-			pixel_fraction pf;
-			float p0 = float(y+0) * my + float(sample.y0);
-			float p1 = float(y+1) * my + float(sample.y0);
-			int i0 = pf.i0 = std::floor(p0);
-			int i1 = pf.i1 = std::floor(p1);
-			if(i0 == i1) {
-				pf.f0 = my;
-				pf.f1 = 0;
-			} else {
-				pf.f0 = float(i1) - p0;
-				pf.f1 = p1 - float(i1);
-			}
-			fractions_y[y] = pf;
-		}
-
-		// convert image data to floats.
-		vector<float> image_data(image.data.size());
-		const float m = 1.0f / 255.0f;
-		for(int x=0;x<image.data.size();x++) image_data[x] = float(image.data[x]) * m;
-
-		// project image-area into sample-area.
-		for(int y=0;y<image.h;y++) {
-		for(int x=0;x<image.w;x++) {
-			// get pixel colour.
-			float clr[4];// colour of this image-pixel.
-			for(int c=0;c<4;c++) clr[c] = image_data[image.get_offset(x, y) + c];
-			// determine which sample-pixels the image-pixel intersects.
-			const pixel_fraction& pfx = fractions_x[x];
-			const pixel_fraction& pfy = fractions_y[y];
-			// add pixel colours based on sample-pixel-area covered by image-pixel.
-			bool p00 = true;
-			bool p10 = pfx.i1 != pfx.i0;
-			bool p01 = pfy.i1 != pfy.i0;
-			bool p11 = p10 && p01;
-			if(p00) {
-				int ofs = sample.get_offset(pfx.i0, pfy.i0);
-				float area = pfx.f0 * pfy.f0;
-				for(int c=0;c<4;c++) sample.data[ofs+c] += clr[c]*area;
-			}
-			if(p10) {
-				int ofs = sample.get_offset(pfx.i1, pfy.i0);
-				float area = pfx.f1 * pfy.f0;
-				for(int c=0;c<4;c++) sample.data[ofs+c] += clr[c]*area;
-			}
-			if(p11) {
-				int ofs = sample.get_offset(pfx.i1, pfy.i1);
-				float area = pfx.f1 * pfy.f1;
-				for(int c=0;c<4;c++) sample.data[ofs+c] += clr[c]*area;
-			}
-			if(p01) {
-				int ofs = sample.get_offset(pfx.i0, pfy.i1);
-				float area = pfx.f0 * pfy.f1;
-				for(int c=0;c<4;c++) sample.data[ofs+c] += clr[c]*area;
-			}
-		}}
-
-		// clamp sample image colours.
-		// sometimes colour values get slightly out of range due to loss-of-precision.
-		for(int x=0;x<sample.data.size();x++) if(sample.data[x] > 1.0f || sample.data[x] < 0.0f) {
-			//printf("pixel value out of bounds: %f\n", sample.data[x]);
-			sample.data[x] = std::clamp(sample.data[x], 0.0f, 1.0f);
-		}
-	}
-
-	/*
-		generate input values by sampling loaded training images.
-
-		- if the original image is smaller than the input area,
-		then the image is just copied to input and centered.
-
-		- if the original image is larger than the input area,
-		then it is scaled to fit in input area.
-
-		values outside the sample area are set to 0 and are ignored
-		when computing error.
-	*/
-	void generate_sample_image(const file_image& image, sample_image& sample) {
-		sample.clear();
-
-		// if loaded image is smaller than sample area, then copy.
-		if(image.w <= sample.w && image.h <= sample.h) {
-			int remaining_w = sample.w - image.w;
-			int remaining_h = sample.h - image.h;
-			sample.x0 = remaining_w/2;
-			sample.y0 = remaining_h/2;
-			sample.x1 = sample.x0 + image.w;
-			sample.y1 = sample.y0 + image.h;
-			sample_area_copy(image, sample);
-		}
-
-		// if loaded image is larger than sample area, then scale down.
-		else {
-			// determine which dimension to scale against.
-			float iw_over_sw = float(image.w) / float(sample.w);
-			float ih_over_sh = float(image.h) / float(sample.h);
-			float scale_factor = 1;
-			if(iw_over_sw >= ih_over_sh) {
-				// scale to sample width.
-				int scaled_h = std::min(((image.h * sample.w) / image.w), sample.h);
-				sample.x0 = 0;
-				sample.x1 = sample.w;
-				int remaining_h = sample.h  - scaled_h;
-				sample.y0 = remaining_h / 2;
-				sample.y1 = (sample.y0 + scaled_h);
-			} else {
-				// scale to sample height.
-				int scaled_w = std::min(((image.w * sample.h) / image.h), sample.w);
-				sample.y0 = 0;
-				sample.y1 = sample.h;
-				int remaining_w = sample.w  - scaled_w;
-				sample.x0 = remaining_w / 2;
-				sample.x1 = (sample.x0 + scaled_w);
-			}
-
-			// sample image data.
-			sample_area_minify_WxH_linear(image, sample);
-		}
-	};
-
-	void generate_error_image(const sample_image& input, const sample_image& output, sample_image& error) {
-		for(int y=input.y0;y<input.y1;y++) {
-		for(int x=input.x0;x<input.x1;x++) {
-			int ofs = input.get_offset(x, y);
-			for(int c=0;c<4;c++) {
-				int i = ofs+c;
-				error.data[i] = input.data[i] - output.data[i];
-			}
-		}}
-	}
-
 	/*
 		a simple iterator for iterating on an image
 		with a variable number of channels.
+
+		NOTE: image is assumed to be in row-major form
+		with interleaved colour channels.
 	*/
 	struct variable_image_iterator {
 		// image dimensions.
@@ -422,7 +214,16 @@ namespace ML::image {
 			this->c = c0;
 			this->i    = ((y0 * X) + x0) * C + c0;
 			this->iend = ((y1 * X) + x1) * C + c1;
-			assert(this->length() > 0);
+			// assertions.
+			assert(x0 >= 0);
+			assert(y0 >= 0);
+			assert(c0 >= 0);
+			assert(x1 <= X);
+			assert(y1 <= Y);
+			assert(c1 <= C);
+			assert(x1 > x0);
+			assert(y1 > y0);
+			assert(c1 > c0);
 		}
 
 		int length() {
@@ -496,12 +297,21 @@ namespace ML::image {
 			setup_outer_iterator();
 			setup_inner_iterator(outer_iterator);
 			this->i = outer_iterator.i * TILE_LENGTH + inner_iterator.i;
-			assert(length() > 0);
+			// assertions.
+			assert(x0 >= 0);
+			assert(y0 >= 0);
+			assert(c0 >= 0);
+			assert(x1 <= X);
+			assert(y1 <= Y);
+			assert(c1 <= C);
+			assert(x1 > x0);
+			assert(y1 > y0);
+			assert(c1 > c0);
+			assert(X % TX == 0);
+			assert(Y % TY == 0);
+			assert(C % TC == 0);
 		}
 
-		bool has_next() {
-			return inner_iterator.has_next();
-		}
 		int length() {
 			return (x1 - x0) * (y1 - y0) * (c1 - c0);
 		}
@@ -516,6 +326,9 @@ namespace ML::image {
 			c = outer_iterator.c * TC + inner_iterator.c;
 			i = outer_iterator.i * TILE_LENGTH + inner_iterator.i;
 			return i;
+		}
+		bool has_next() {
+			return outer_iterator.has_next();
 		}
 
 	private:
@@ -559,14 +372,222 @@ namespace ML::image {
 	template<class T>
 	struct variable_image {
 		vector<T> data;
-		int X;// width.
-		int Y;// height.
-		int C;// number of channels.
+		int X = 0;// width.
+		int Y = 0;// height.
+		int C = 0;// number of channels.
+		// sample bounds.
+		int x0,x1;
+		int y0,y1;
 
-		/* TODO
-		void scale_image_values(T mult) {}
-		*/
+		void clear() {
+			for(int x=0;x<data.size();x++) data[x] = 0;
+		}
 	};
+
+	/*
+	struct sample_image {
+		vector<float> data;
+		// dimensions of data.
+		int w = 0;
+		int h = 0;
+		// sample area.
+		int x0 = 0, x1 = 0;
+		int y0 = 0, y1 = 0;
+
+		sample_image(int w, int h) {
+			this->w = w;
+			this->h = h;
+			this->data = vector<float>(w*h*4);
+		}
+
+		void clear() {
+			for(int x=0;x<data.size();x++) data[x] = 0.0f;
+			x0 = x1 = 0;
+			y0 = y1 = 0;
+		}
+
+		int get_offset(int x, int y) const {
+			return (y*w + x) * 4;
+		}
+
+		file_image to_byte_image() {
+			file_image image;
+			image.data = vector<byte>(data.size());
+			image.w = w;
+			image.h = h;
+			const float m = 255.0f / 1.0f;
+			for(int x=0;x<data.size();x++) image.data[x] = byte(data[x] * m);
+			return image;
+		}
+	};
+	//*/
+
+	const int TILE_SIZE_X = 4;
+	const int TILE_SIZE_Y = 4;
+	const int TILE_SIZE_C = 1;
+
+	void sample_area_copy(variable_image<float>& sample, const file_image& image) {
+		// assert that input parameters make sense.
+		assert((sample.x1 - sample.x0) == image.X);
+		assert((sample.y1 - sample.y0) == image.Y);
+		assert(sample.C == image.C);
+
+		variable_image_tile_iterator sample_iter(
+			TILE_SIZE_X, TILE_SIZE_Y, TILE_SIZE_C,
+			sample.X, sample.Y, sample.C,
+			sample.x0, sample.x1,
+			sample.y0, sample.y1,
+			0, image.C
+		);
+
+		const float m = 1.0f / 255.0f;
+		while(sample_iter.has_next()) {
+			int ofs = image.get_offset(
+				sample_iter.x - sample.x0,
+				sample_iter.y - sample.y0,
+				sample_iter.c
+			);
+			sample.data[sample_iter.i] = m * image.data[ofs];
+			sample_iter.next();
+		}
+	}
+	void sample_area_nearest_neighbour(variable_image<float>& sample, const file_image& image) {
+		variable_image_tile_iterator sample_iter(
+			TILE_SIZE_X, TILE_SIZE_Y, TILE_SIZE_C,
+			sample.X, sample.Y, sample.C,
+			sample.x0, sample.x1,
+			sample.y0, sample.y1,
+			0, image.C
+		);
+
+		const float m = 1.0f / 255.0f;
+		const float x_inv_scale_factor = float(image.X) / float(sample.x1 - sample.x0);
+		const float y_inv_scale_factor = float(image.Y) / float(sample.y1 - sample.y0);
+		while(sample_iter.has_next()) {
+			int ix = std::clamp(int(float(sample_iter.x - sample.x0) * x_inv_scale_factor), 0, image.X);
+			int iy = std::clamp(int(float(sample_iter.y - sample.y0) * y_inv_scale_factor), 0, image.Y);
+			int ofs = image.get_offset(ix, iy, sample_iter.c);
+			sample.data[sample_iter.i] = m * image.data[ofs];
+			sample_iter.next();
+		}
+	}
+	void sample_area_linear(variable_image<float>& sample, const file_image& image) {
+		// compute float conversions between sample coordinates to image coordinates.
+		// TODO - more float conversions may be required for performance.
+		vector<int> floor_mx(sample.X+1);
+		vector<int> floor_my(sample.Y+1);
+		vector<int> ceil__mx(sample.X+1);
+		vector<int> ceil__my(sample.Y+1);
+		vector<float> image_to_sample_x(image.X+1);
+		vector<float> image_to_sample_y(image.Y+1);
+		{
+			float mx = float(image.X) / float(sample.X);
+			float my = float(image.Y) / float(sample.Y);
+			for(int x=0;x<=sample.X;x++) floor_mx[x] = std::floor(float(x) * mx);
+			for(int y=0;y<=sample.Y;y++) floor_my[y] = std::floor(float(y) * mx);
+			for(int x=0;x<=sample.X;x++) ceil__mx[x] = std::ceil(float(x) * mx);
+			for(int y=0;y<=sample.Y;y++) ceil__my[y] = std::ceil(float(y) * mx);
+			for(int x=0;x<=image.X;x++) image_to_sample_x[x] = float(x) / mx;
+			for(int y=0;y<=image.Y;y++) image_to_sample_y[y] = float(y) / my;
+		}
+
+		variable_image_tile_iterator sample_iter(
+			TILE_SIZE_X, TILE_SIZE_Y, TILE_SIZE_C,
+			sample.X, sample.Y, sample.C,
+			sample.x0, sample.x1,
+			sample.y0, sample.y1,
+			0, image.C
+		);
+
+		const float m = 1.0f / 255.0f;
+		while(sample_iter.has_next()) {
+			// gather weighted sum of image-pixel values according to
+			// area of intersection between sample-pixel and image-pixel.
+			int ix0 = floor_mx[sample_iter.x];
+			int ix1 = ceil__mx[sample_iter.x + 1];
+			int iy0 = floor_my[sample_iter.y];
+			int iy1 = ceil__my[sample_iter.y + 1];
+			for(int iy=iy0;iy<iy1;iy++) {
+			for(int ix=ix0;ix<ix1;ix++) {
+				// compute area of intersection between scaled image-pixel and sample-pixel,
+				// normalized such that sample-pixel area=1.
+				float intersect_length_x = std::min(image_to_sample_x[ix+1], float(sample_iter.x+1)) - std::max(image_to_sample_x[ix], float(sample_iter.x));
+				float intersect_length_y = std::min(image_to_sample_y[iy+1], float(sample_iter.y+1)) - std::max(image_to_sample_y[iy], float(sample_iter.y));
+				float area = intersect_length_x * intersect_length_y;
+				sample.data[sample_iter.i] += image.data[image.get_offset(ix, iy, sample_iter.c)] * area;
+			}}
+			sample_iter.next();
+		}
+	}
+
+	/*
+		generate input values by sampling loaded training images.
+
+		- if the original image is smaller than the input area,
+		then the image is just copied to input and centered.
+
+		- if the original image is larger than the input area,
+		then it is scaled to fit in input area.
+
+		values outside the sample area are set to 0 and are ignored
+		when computing error.
+	*/
+	void generate_sample_image(variable_image<float>& sample, const file_image& image) {
+		sample.clear();
+
+		// if loaded image is smaller than sample area, then copy.
+		if(image.X <= sample.X && image.Y <= sample.Y) {
+			int remaining_w = sample.X - image.X;
+			int remaining_h = sample.Y - image.Y;
+			sample.x0 = remaining_w/2;
+			sample.y0 = remaining_h/2;
+			sample.x1 = sample.x0 + image.X;
+			sample.y1 = sample.y0 + image.Y;
+			sample_area_copy(sample, image);
+		}
+
+		// if loaded image is larger than sample area, then scale down.
+		else {
+			// determine which dimension to scale against.
+			float iw_over_sw = float(image.X) / float(sample.X);
+			float ih_over_sh = float(image.Y) / float(sample.Y);
+			float scale_factor = 1;
+			if(iw_over_sw >= ih_over_sh) {
+				// scale to sample width.
+				int scaled_h = std::min(((image.Y * sample.X) / image.X), sample.Y);
+				sample.x0 = 0;
+				sample.x1 = sample.X;
+				int remaining_h = sample.Y  - scaled_h;
+				sample.y0 = remaining_h / 2;
+				sample.y1 = (sample.y0 + scaled_h);
+			} else {
+				// scale to sample height.
+				int scaled_w = std::min(((image.X * sample.Y) / image.Y), sample.X);
+				sample.y0 = 0;
+				sample.y1 = sample.Y;
+				int remaining_w = sample.X  - scaled_w;
+				sample.x0 = remaining_w / 2;
+				sample.x1 = (sample.x0 + scaled_w);
+			}
+
+			// sample image data.
+			sample_area_linear(sample, image);
+		}
+	};
+	void generate_error_image(const variable_image<float>& input, const variable_image<float>& output, variable_image<float>& error) {
+		variable_image_tile_iterator sample_iter(
+			TILE_SIZE_X, TILE_SIZE_Y, TILE_SIZE_C,
+			input.X, input.Y, input.C,
+			input.x0, input.x1,
+			input.y0, input.y1,
+			0, input.C
+		);
+		while(sample_iter.has_next()) {
+			int i = sample_iter.i;
+			error.data[i] = input.data[i] - output.data[i];
+			sample_iter.next();
+		}
+	}
 }
 
 #endif

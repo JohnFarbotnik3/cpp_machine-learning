@@ -61,10 +61,6 @@ as it gives clues about what the layer is for, as well as hinting at preferred m
 
 
 > optimize autoencoder.
-- add multithreading.
-	^ spawn N threads.
-	^ while end of neurons array not reached, each thread gets next interval to update
-	(advancing shared interval-start position).
 * figure out why backprop (specifically the weights part) isnt scaling well with number of threads.
 	n_threads=1: foreward=60ms, backprop=70ms
 	n_threads=2: foreward=31ms, backprop=57ms
@@ -74,6 +70,9 @@ image tiling iterators meanwhile also implementing images + layer-generation wit
 (this will be an overhaul)
 * NOTE: running "perf record -- COMMAND [OPTIONS...]" then "perf report" can show
 useful information about program hotspots.
+- test image iterators (by printing indices and coordinates).
+- create variable_image.
+- use variable_image in autoencoder (mostly replacing sample_image).
 ...
 
 
