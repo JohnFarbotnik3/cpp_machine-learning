@@ -112,9 +112,9 @@ namespace ML::models {
 		void propagate(const int n_threads, const std::vector<float>& input_values, std::vector<float>& output_values) override {
 			// spawn threads.
 			vector<int> intervals = generate_intervals(n_threads, neurons.size());
-			vector<std::jthread> threads;
+			vector<std::thread> threads;
 			for(int x=0;x<n_threads;x++) {
-				threads.push_back(std::jthread(
+				threads.push_back(std::thread(
 					propagate_func,
 					std::ref(input_values),
 					std::ref(output_values),
@@ -160,8 +160,8 @@ namespace ML::models {
 				for(int x=itv.beg;x<itv.end;x++) {
 					backprop_target& bt = backprop_targets.targets[x];
 					const float signal_error_term = signal_error_terms[bt.neuron_index];
-					input_error_sum += signal_error_term * bt.weight * mult;
-					bt.weight_error += signal_error_term * value * mult;
+					input_error_sum += signal_error_term * mult * bt.weight;
+					bt.weight_error += signal_error_term * mult * value;
 				}
 				input_error[n] = input_error_sum;
 			}
@@ -189,9 +189,9 @@ namespace ML::models {
 			std::vector<float> signal_error_terms(neurons.size());
 			{
 				vector<int> intervals = generate_intervals(n_threads, neurons.size());
-				vector<std::jthread> threads;
+				vector<std::thread> threads;
 				for(int x=0;x<n_threads;x++) {
-					threads.push_back(std::jthread(
+					threads.push_back(std::thread(
 						back_propagate_func_0,
 						std::ref(output_error),
 						std::ref(signal_error_terms),
@@ -207,9 +207,9 @@ namespace ML::models {
 			// back propagate input error.
 			{
 				vector<int> intervals = generate_intervals(n_threads, input_error.size());
-				vector<std::jthread> threads;
+				vector<std::thread> threads;
 				for(int x=0;x<n_threads;x++) {
-					threads.push_back(std::jthread(
+					threads.push_back(std::thread(
 						back_propagate_func_1,
 						std::ref(output_error),
 						std::ref(input_error),

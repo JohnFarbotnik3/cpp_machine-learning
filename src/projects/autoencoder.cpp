@@ -21,11 +21,15 @@ run:
 -h 512 \
 -tc 500 \
 -tcp 50 \
+-pmp 0 \
 -bsz 5 \
 -bitv 2 \
 -lr 0.02 \
 -seed 12345 \
 -n_threads 2
+
+perf:
+perf stat -d -d -d -- <RUN COMMAND WITH OPTIONS>
 
 */
 
@@ -229,6 +233,7 @@ int main(const int argc, const char** argv) {
 	int input_h = arguments.get_named_value("-h", 512);
 	int n_training_cycles = arguments.get_named_value("-tc", 20);
 	int training_print_itv = arguments.get_named_value("-tcp", 1);
+	int pmp = arguments.get_named_value("-pmp", 1);
 	settings.minibatch_size = arguments.get_named_value("-bsz", 5);
 	settings.minibatch_apply_error_interval = arguments.get_named_value("-bitv", 1);
 	settings.learning_rate = arguments.get_named_value("-lr", 0.001f);
@@ -240,7 +245,7 @@ int main(const int argc, const char** argv) {
 	ML::models::autoencoder model(input_w, input_h);
 	model.init_model_parameters(settings.seed, 0.0f, 0.3f, 0.0f, 0.2f);
 	printf("==============================\n");
-	print_model_parameters(model);
+	if(pmp) print_model_parameters(model);
 	printf("------------------------------\n");
 
 	// get list of images in input directory.
@@ -274,7 +279,7 @@ int main(const int argc, const char** argv) {
 	printf("done training.\n");
 	printf("==============================\n");
 	print_training_stats(settings.stats);
-	print_model_parameters(model);
+	if(pmp) print_model_parameters(model);
 	settings.stats.clear_all();
 	printf("------------------------------\n");
 
