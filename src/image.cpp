@@ -421,6 +421,7 @@ namespace ML::image {
 			this->c = c0;
 			this->i    = ((y0 * X) + x0) * C + c0;
 			this->iend = ((y1 * X) + x1) * C + c1;
+			assert(this->length() > 0);
 		}
 
 		bool has_next() {
@@ -448,25 +449,32 @@ namespace ML::image {
 	struct variable_image_tile_iterator {
 		// image dimensions.
 		int X,Y,C;
+		// tile dimensions.
+		int TX,TY,TC;
 		// current position.
 		int x,y,c;
-		// iterator bounds.
+		// origin of current tile in image.
+		int orx,ory,orc;
+		// iterator bounds in image.
 		int x0,x1;
 		int y0,y1;
 		int c0,c1;
-		// size of each tile.
-		int TX,TY;
-		// current tile bounds.
+		// current tile bounds in image.
 		int tx0,tx1;
 		int ty0,ty1;
+		int tc0,tc1;
+		// tile stride in image data - used for computing index.
+		int TILE_STRIDE_X;// TODO
+		int TILE_STRIDE_Y;
+		int TILE_STRIDE_C;
 		// index in image data.
-		int i;
+		int i;// WARNING: index is currently calculated wrong!
 		// end index.
 		int iend;
 
 		variable_image_tile_iterator(
 			int X, int Y, int C,
-			int TX, int TY,
+			int TX, int TY, int TC,
 			int x0, int x1,
 			int y0, int y1,
 			int c0, int c1
@@ -476,6 +484,7 @@ namespace ML::image {
 			this->C = C;
 			this->TX = TX;
 			this->TY = TY;
+			this->TC = TC;
 			this->x0 = x0;
 			this->x1 = x1;
 			this->y0 = y0;
@@ -485,8 +494,20 @@ namespace ML::image {
 			this->x = x0;
 			this->y = y0;
 			this->c = c0;
-			this->i    = ((y0 * X) + x0) * C + c0;
-			this->iend = ((y1 * X) + x1) * C + c1;
+			this->orx = (x0/TX)*TX;
+			this->ory = (y0/TY)*TY;
+			this->orc = (c0/TC)*TC;
+			TILE_STRIDE_C = TX * TY * TC;
+			TILE_STRIDE_X = (C / TC) * TILE_STRIDE_C;
+			TILE_STRIDE_Y = (X / TX) * TILE_STRIDE_X;
+			this->i    = ((y0 * X) + x0) * C + c0;// TODO - fix this!
+			this->iend = ((y1 * X) + x1) * C + c1;// TODO - fix this!
+			update_tile_bounds();
+			assert(length() > 0);
+			assert(TX > 0);
+			assert(TY > 0);
+			assert(X % TX == 0);
+			assert(Y % TY == 0);
 		}
 
 		bool has_next() {
@@ -497,10 +518,42 @@ namespace ML::image {
 		}
 		int next() {
 			c++;
-			if(c >= c1) { c=c0; x++; }
-			if(x >= x1) { x=x0; y++; }
-			i = ((y*X) + x)*C + c;
+			if(c >= tc1) { c=tc0; x++; }
+			if(x >= tx1) { x=tx0; y++; }
+			if(y >= ty1) { next_tile(); }
+			i = ((y*X) + x)*C + c;// TODO - fix this!
 			return i;
+		}
+
+	private:
+		int get_index(int x, int y, int c) {
+			return (
+				(y/TY) * TILE_STRIDE_Y +
+				(x/TX) * TILE_STRIDE_X +
+				(c/TC) * TILE_STRIDE_C +
+				()
+			);
+		}
+
+		// move cursor to next tile.
+		void next_tile() {
+			orc += TC;
+			if(orc >= C) { orc=(c0/TC)*TC; orx+=TX; }
+			if(orx >= X) { orx=(x0/TX)*TX; ory+=TY; }
+			update_tile_bounds();
+			// move to start of next tile.
+			x = tx0;
+			y = ty0;
+		}
+
+		// clamp tile-bounds to image-bounds of iterator.
+		void update_tile_bounds() {
+			tc0 = std::max(c0, orc);
+			tc1 = std::min(c1, orc + TC);
+			tx0 = std::max(x0, orx);
+			tx1 = std::min(x1, orx + TX);
+			ty0 = std::max(y0, ory);
+			ty1 = std::min(y1, ory + TY);
 		}
 	};
 
