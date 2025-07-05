@@ -603,16 +603,22 @@ namespace ML::image {
 			sample_area_linear(sample, image);
 		}
 	};
-	void generate_error_image(const variable_image_tiled<float>& input, const variable_image_tiled<float>& output, variable_image_tiled<float>& error) {
+	void generate_error_image(const variable_image_tiled<float>& input, const variable_image_tiled<float>& output, variable_image_tiled<float>& error, bool loss_squared) {
 		variable_image_tile_iterator sample_iter = input.get_iterator(
 			input.x0, input.x1,
 			input.y0, input.y1,
 			0, input.C
 		);
 
-		while(sample_iter.has_next()) {
+		if(loss_squared) while(sample_iter.has_next()) {
 			int i = sample_iter.i;
-			error.data[i] = input.data[i] - output.data[i];
+			const float delta = input.data[i] - output.data[i];
+			error.data[i] = delta * std::abs(delta);
+			sample_iter.next();
+		} else while(sample_iter.has_next()) {
+			int i = sample_iter.i;
+			const float delta = input.data[i] - output.data[i];
+			error.data[i] = delta;
 			sample_iter.next();
 		}
 	}

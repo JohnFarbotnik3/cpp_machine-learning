@@ -19,12 +19,13 @@ run:
 -o ./data/output/images_02 \
 -w 512 \
 -h 512 \
--tc 500 \
+-tc 50 \
+-tadjustlr_itv 50 \
+-tadjustlr_len 10 \
 -tcp 50 \
 -pmp 0 \
 -bsz 5 \
--bitv 2 \
--lr 0.02 \
+-lr 0.20 \
 -seed 12345 \
 -n_threads 2
 
@@ -47,8 +48,6 @@ struct training_settings {
 	float learning_rate;
 	int n_threads;
 	int minibatch_size;
-	int minibatch_apply_error_interval;
-	int minibatch_counter = 0;
 	int seed;
 	std::mt19937 gen32;
 };
@@ -113,7 +112,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 
 			// compute error.
 			t0 = timepoint::now();
-			ML::image::generate_error_image(image_input, image_output, image_error);
+			ML::image::generate_error_image(image_input, image_output, image_error, true);
 			float avg_error = 0;
 			for(int x=0;x<image_error.data.size();x++) avg_error += std::abs(image_error.data[x]);
 			avg_error /= image_error.data.size();
@@ -128,37 +127,34 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 			settings.stats.push_value("dt backprop", t1.delta_us(t0));
 		}
 		// adjust model.
-		settings.minibatch_counter++;
-		if((settings.minibatch_counter % settings.minibatch_apply_error_interval) == 0) {
-			timepoint t0 = timepoint::now();
-			model.apply_batch_error(settings.learning_rate / minibatch.size());
-			timepoint t1 = timepoint::now();
-			settings.stats.push_value("dt apply error", t1.delta_us(t0));
-		}
+		timepoint t0 = timepoint::now();
+		model.apply_batch_error(settings.learning_rate / minibatch.size());
+		timepoint t1 = timepoint::now();
+		settings.stats.push_value("dt apply error", t1.delta_us(t0));
 	}
 }
 
 void update_learning_rate(ML::models::autoencoder& model, training_settings& settings, int cycles) {
-	training_settings settings_0 = settings;
-	training_settings settings_1 = settings;
-	training_settings settings_2 = settings;
-	ML::models::autoencoder model_0 = model;
-	ML::models::autoencoder model_1 = model;
-	ML::models::autoencoder model_2 = model;
-	settings_0.learning_rate = settings.learning_rate / 1.2f;
-	settings_1.learning_rate = settings.learning_rate * 1.0f;
-	settings_2.learning_rate = settings.learning_rate * 1.2f;
-	printf("trying rate = %f\n", settings_0.learning_rate); for(int x=0;x<cycles;x++) training_cycle(model_0, settings_0);
-	printf("trying rate = %f\n", settings_1.learning_rate); for(int x=0;x<cycles;x++) training_cycle(model_1, settings_1);
-	printf("trying rate = %f\n", settings_2.learning_rate); for(int x=0;x<cycles;x++) training_cycle(model_2, settings_2);
-	const vector<int> percentiles { 20 };
-	float pct_error_0 = ML::stats::get_percentile_values(percentiles, settings_0.stats.groups.at("avg error"))[0];
-	float pct_error_1 = ML::stats::get_percentile_values(percentiles, settings_1.stats.groups.at("avg error"))[0];
-	float pct_error_2 = ML::stats::get_percentile_values(percentiles, settings_2.stats.groups.at("avg error"))[0];
-	float lowest_error = std::min(std::min(pct_error_0, pct_error_1), pct_error_2);
-	if(lowest_error == pct_error_0) { model = model_0; settings = settings_0; }
-	if(lowest_error == pct_error_1) { model = model_1; settings = settings_1; }
-	if(lowest_error == pct_error_2) { model = model_2; settings = settings_2; }
+	float best_pct_error;
+	training_settings best_settings = settings;
+	ML::models::autoencoder best_model = model;
+
+	vector<float> lr_mults { 1.0/1.5, 1.0/1.2, 1.0, 1.0*1.2, 1.0*1.5};
+	for(int z=0;z<lr_mults.size();z++) {
+		training_settings test_settings = settings;
+		ML::models::autoencoder test_model = model;
+		test_settings.learning_rate = settings.learning_rate * lr_mults[z];
+		printf("trying rate = %f\n", test_settings.learning_rate); for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings);
+		const vector<int> percentiles { 20 };
+		float pct_error = ML::stats::get_percentile_values(percentiles, test_settings.stats.groups.at("avg error"))[0];
+		if(pct_error < best_pct_error || z == 0) {
+			best_pct_error = pct_error;
+			best_settings = test_settings;
+			best_model = test_model;
+		}
+	}
+	model = best_model;
+	settings = best_settings;
 }
 
 void print_training_stats(ML::stats::training_stats& stats) {
@@ -243,8 +239,9 @@ int main(const int argc, const char** argv) {
 	int n_training_cycles = arguments.get_named_value("-tc", 20);
 	int training_print_itv = arguments.get_named_value("-tcp", 1);
 	int pmp = arguments.get_named_value("-pmp", 1);
+	int tadjustlr_itv = arguments.get_named_value("-tadjustlr_itv", 50);
+	int tadjustlr_len = arguments.get_named_value("-tadjustlr_len", 10);
 	settings.minibatch_size = arguments.get_named_value("-bsz", 5);
-	settings.minibatch_apply_error_interval = arguments.get_named_value("-bitv", 1);
 	settings.learning_rate = arguments.get_named_value("-lr", 0.001f);
 	settings.seed = arguments.get_named_value("-seed", 12345);
 	settings.n_threads = arguments.get_named_value("-n_threads", 1);
@@ -267,7 +264,6 @@ int main(const int argc, const char** argv) {
 	// train model.
 	printf("starting training.\n");
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
-	settings.minibatch_counter = 0;
 	for(int z=0;z<n_training_cycles;z++) {
 		// run training batch.
 		printf("training cycle: %i / %i.\n", z, n_training_cycles);
@@ -280,11 +276,11 @@ int main(const int argc, const char** argv) {
 			printf("------------------------------\n");
 		}
 		// update learning rate.
-		if(z % 50 == 0) {
+		if(z % tadjustlr_itv == 0) {
 			printf("updating learning rate:\n");
-			update_learning_rate(model, settings, 10);
+			update_learning_rate(model, settings, tadjustlr_len);
 			printf("new learning rate: %f\n", settings.learning_rate);
-			z += 10;
+			z += tadjustlr_len;
 		}
 	}
 	printf("done training.\n");
