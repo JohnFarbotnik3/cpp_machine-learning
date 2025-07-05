@@ -130,6 +130,7 @@ namespace ML::image {
 		}
 
 		static bool save(const file_image& image, string filepath, const int num_channels) {
+			printf("save(): X=%i, Y=%i, C=%i, ch=%i, size=%lu, path=%s\n", image.X, image.Y, image.C, num_channels, image.data.size(), filepath.c_str());
 			// create parent directories as needed.
 			std::error_code ec;
 			fs::path parent_dir = fs::path(filepath).parent_path();
@@ -190,8 +191,8 @@ namespace ML::image {
 		int c0,c1;
 		// index in image data.
 		int i;
-		// end index.
-		int iend;
+		// iterator steps remaining.
+		int irem;
 
 		variable_image_iterator() = default;
 		variable_image_iterator(
@@ -212,8 +213,8 @@ namespace ML::image {
 			this->x = x0;
 			this->y = y0;
 			this->c = c0;
-			this->i    = ((y0 * X) + x0) * C + c0;
-			this->iend = ((y1 * X) + x1) * C + c1;
+			this->i = ((y * X) + x) * C + c;
+			this->irem = length();
 			// assertions.
 			assert(x0 >= 0);
 			assert(y0 >= 0);
@@ -221,23 +222,21 @@ namespace ML::image {
 			assert(x1 <= X);
 			assert(y1 <= Y);
 			assert(c1 <= C);
-			assert(x1 > x0);
-			assert(y1 > y0);
-			assert(c1 > c0);
 		}
 
 		int length() {
-			return (x1 - x0) * (y1 - y0) * (c1 - c0);
+			return std::max(x1-x0, 0) * std::max(y1-y0, 0) * std::max(c1-c0, 0);
+		}
+		bool has_next() {
+			return irem > 0;
 		}
 		int next() {
+			irem--;
 			c++;
 			if(c >= c1) { c=c0; x++; }
 			if(x >= x1) { x=x0; y++; }
 			i = ((y*X) + x)*C + c;
 			return i;
-		}
-		bool has_next() {
-			return y < y1;
 		}
 	};
 
@@ -262,6 +261,8 @@ namespace ML::image {
 		int c0,c1;
 		// index in image data.
 		int i;
+		// iterator steps remaining.
+		int irem;
 		// tile dimensions.
 		int TX,TY,TC;
 		// length of tile in image data.
@@ -297,6 +298,7 @@ namespace ML::image {
 			setup_outer_iterator();
 			setup_inner_iterator(outer_iterator);
 			this->i = outer_iterator.i * TILE_LENGTH + inner_iterator.i;
+			this->irem = length();
 			// assertions.
 			assert(x0 >= 0);
 			assert(y0 >= 0);
@@ -304,18 +306,20 @@ namespace ML::image {
 			assert(x1 <= X);
 			assert(y1 <= Y);
 			assert(c1 <= C);
-			assert(x1 > x0);
-			assert(y1 > y0);
-			assert(c1 > c0);
 			assert(X % TX == 0);
 			assert(Y % TY == 0);
 			assert(C % TC == 0);
 		}
 
 		int length() {
-			return (x1 - x0) * (y1 - y0) * (c1 - c0);
+			return std::max(x1-x0, 0) * std::max(y1-y0, 0) * std::max(c1-c0, 0);
+		}
+		bool has_next() {
+			return irem > 0;
 		}
 		int next() {
+			irem--;
+			//printf("next: x=%i, y=%i, c=%i, i=%i\n", x, y, c, i);
 			inner_iterator.next();
 			if(!inner_iterator.has_next()) {
 				outer_iterator.next();
@@ -326,9 +330,6 @@ namespace ML::image {
 			c = outer_iterator.c * TC + inner_iterator.c;
 			i = outer_iterator.i * TILE_LENGTH + inner_iterator.i;
 			return i;
-		}
-		bool has_next() {
-			return outer_iterator.has_next();
 		}
 
 	private:
@@ -356,9 +357,9 @@ namespace ML::image {
 			int tc = outer.c * TC;
 			inner_iterator = variable_image_iterator(
 				TX, TY, TC,
-				std::max(0, x0-tx), std::min(TX, x1-tx),
-				std::max(0, y0-ty), std::min(TY, y1-ty),
-				std::max(0, c0-tc), std::min(TC, c1-tc)
+				std::max(x0-tx, 0), std::min(x1-tx, TX),
+				std::max(y0-ty, 0), std::min(y1-ty, TY),
+				std::max(c0-tc, 0), std::min(c1-tc, TC)
 			);
 		}
 	};
@@ -370,17 +371,46 @@ namespace ML::image {
 		either by hand or with the help of image iterators.
 	*/
 	template<class T>
-	struct variable_image {
+	struct variable_image_tiled {
 		vector<T> data;
 		int X = 0;// width.
 		int Y = 0;// height.
 		int C = 0;// number of channels.
+		int TX = 0;// tile width.
+		int TY = 0;// tile height.
+		int TC = 0;// tile channels.
 		// sample bounds.
 		int x0,x1;
 		int y0,y1;
 
+		variable_image_tiled(
+			int X, int Y, int C,
+			int TX, int TY, int TC
+		) {
+			assert(X % TX == 0);
+			assert(Y % TY == 0);
+			assert(C % TC == 0);
+
+			this->X = X;
+			this->Y = Y;
+			this->C = C;
+			this->TX = TX;
+			this->TY = TY;
+			this->TC = TC;
+			this->data.resize(X * Y * C);
+			clear();
+		}
+
 		void clear() {
 			for(int x=0;x<data.size();x++) data[x] = 0;
+		}
+
+		variable_image_tile_iterator get_iterator(
+			int x0, int x1,
+			int y0, int y1,
+			int c0, int c1
+		) const {
+			return variable_image_tile_iterator(TX, TY, TC, X, Y, C, x0, x1, y0, y1, c0, c1);
 		}
 	};
 
@@ -422,19 +452,13 @@ namespace ML::image {
 	};
 	//*/
 
-	const int TILE_SIZE_X = 4;
-	const int TILE_SIZE_Y = 4;
-	const int TILE_SIZE_C = 1;
-
-	void sample_area_copy(variable_image<float>& sample, const file_image& image) {
-		// assert that input parameters make sense.
+	void sample_area_copy(variable_image_tiled<float>& sample, const file_image& image) {
+		// assert that image-area and sample-area match.
 		assert((sample.x1 - sample.x0) == image.X);
 		assert((sample.y1 - sample.y0) == image.Y);
 		assert(sample.C == image.C);
 
-		variable_image_tile_iterator sample_iter(
-			TILE_SIZE_X, TILE_SIZE_Y, TILE_SIZE_C,
-			sample.X, sample.Y, sample.C,
+		variable_image_tile_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -451,10 +475,8 @@ namespace ML::image {
 			sample_iter.next();
 		}
 	}
-	void sample_area_nearest_neighbour(variable_image<float>& sample, const file_image& image) {
-		variable_image_tile_iterator sample_iter(
-			TILE_SIZE_X, TILE_SIZE_Y, TILE_SIZE_C,
-			sample.X, sample.Y, sample.C,
+	void sample_area_nearest_neighbour(variable_image_tiled<float>& sample, const file_image& image) {
+		variable_image_tile_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -471,9 +493,8 @@ namespace ML::image {
 			sample_iter.next();
 		}
 	}
-	void sample_area_linear(variable_image<float>& sample, const file_image& image) {
+	void sample_area_linear(variable_image_tiled<float>& sample, const file_image& image) {
 		// compute float conversions between sample coordinates to image coordinates.
-		// TODO - more float conversions may be required for performance.
 		vector<int> floor_mx(sample.X+1);
 		vector<int> floor_my(sample.Y+1);
 		vector<int> ceil__mx(sample.X+1);
@@ -481,19 +502,17 @@ namespace ML::image {
 		vector<float> image_to_sample_x(image.X+1);
 		vector<float> image_to_sample_y(image.Y+1);
 		{
-			float mx = float(image.X) / float(sample.X);
-			float my = float(image.Y) / float(sample.Y);
-			for(int x=0;x<=sample.X;x++) floor_mx[x] = std::floor(float(x) * mx);
-			for(int y=0;y<=sample.Y;y++) floor_my[y] = std::floor(float(y) * mx);
-			for(int x=0;x<=sample.X;x++) ceil__mx[x] = std::ceil(float(x) * mx);
-			for(int y=0;y<=sample.Y;y++) ceil__my[y] = std::ceil(float(y) * mx);
-			for(int x=0;x<=image.X;x++) image_to_sample_x[x] = float(x) / mx;
-			for(int y=0;y<=image.Y;y++) image_to_sample_y[y] = float(y) / my;
+			float mx = float(image.X) / float(sample.x1 - sample.x0);
+			float my = float(image.Y) / float(sample.y1 - sample.y0);
+			for(int p=0;p<=sample.X;p++) floor_mx[p] = std::floor(float(p) * mx);
+			for(int p=0;p<=sample.Y;p++) floor_my[p] = std::floor(float(p) * my);
+			for(int p=0;p<=sample.X;p++) ceil__mx[p] = std::ceil(float(p) * mx);
+			for(int p=0;p<=sample.Y;p++) ceil__my[p] = std::ceil(float(p) * my);
+			for(int p=0;p<=image.X;p++) image_to_sample_x[p] = float(p) / mx;
+			for(int p=0;p<=image.Y;p++) image_to_sample_y[p] = float(p) / my;
 		}
 
-		variable_image_tile_iterator sample_iter(
-			TILE_SIZE_X, TILE_SIZE_Y, TILE_SIZE_C,
-			sample.X, sample.Y, sample.C,
+		variable_image_tile_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -503,18 +522,28 @@ namespace ML::image {
 		while(sample_iter.has_next()) {
 			// gather weighted sum of image-pixel values according to
 			// area of intersection between sample-pixel and image-pixel.
-			int ix0 = floor_mx[sample_iter.x];
-			int ix1 = ceil__mx[sample_iter.x + 1];
-			int iy0 = floor_my[sample_iter.y];
-			int iy1 = ceil__my[sample_iter.y + 1];
+			int sx = sample_iter.x - sample_iter.x0;
+			int sy = sample_iter.y - sample_iter.y0;
+			int ix0 = floor_mx[sx];
+			int ix1 = ceil__mx[sx + 1];
+			int iy0 = floor_my[sy];
+			int iy1 = ceil__my[sy + 1];
+			// WARNING: the pixel area isnt clamped to input image.
+			// this may cause subtle bugs near edges, or perhaps a segfault.
+			float area_sum = 0;
 			for(int iy=iy0;iy<iy1;iy++) {
 			for(int ix=ix0;ix<ix1;ix++) {
 				// compute area of intersection between scaled image-pixel and sample-pixel,
 				// normalized such that sample-pixel area=1.
-				float intersect_length_x = std::min(image_to_sample_x[ix+1], float(sample_iter.x+1)) - std::max(image_to_sample_x[ix], float(sample_iter.x));
-				float intersect_length_y = std::min(image_to_sample_y[iy+1], float(sample_iter.y+1)) - std::max(image_to_sample_y[iy], float(sample_iter.y));
+				float lx0 = std::max(image_to_sample_x[ix], float(sx));
+				float ly0 = std::max(image_to_sample_y[iy], float(sy));
+				float lx1 = std::min(image_to_sample_x[ix+1], float(sx+1));
+				float ly1 = std::min(image_to_sample_y[iy+1], float(sy+1));
+				float intersect_length_x = lx1 - lx0;
+				float intersect_length_y = ly1 - ly0;
 				float area = intersect_length_x * intersect_length_y;
-				sample.data[sample_iter.i] += image.data[image.get_offset(ix, iy, sample_iter.c)] * area;
+				sample.data[sample_iter.i] += image.data[image.get_offset(ix, iy, sample_iter.c)] * area * m;
+				area_sum += area;
 			}}
 			sample_iter.next();
 		}
@@ -532,7 +561,7 @@ namespace ML::image {
 		values outside the sample area are set to 0 and are ignored
 		when computing error.
 	*/
-	void generate_sample_image(variable_image<float>& sample, const file_image& image) {
+	void generate_sample_image(variable_image_tiled<float>& sample, const file_image& image) {
 		sample.clear();
 
 		// if loaded image is smaller than sample area, then copy.
@@ -574,19 +603,43 @@ namespace ML::image {
 			sample_area_linear(sample, image);
 		}
 	};
-	void generate_error_image(const variable_image<float>& input, const variable_image<float>& output, variable_image<float>& error) {
-		variable_image_tile_iterator sample_iter(
-			TILE_SIZE_X, TILE_SIZE_Y, TILE_SIZE_C,
-			input.X, input.Y, input.C,
+	void generate_error_image(const variable_image_tiled<float>& input, const variable_image_tiled<float>& output, variable_image_tiled<float>& error) {
+		variable_image_tile_iterator sample_iter = input.get_iterator(
 			input.x0, input.x1,
 			input.y0, input.y1,
 			0, input.C
 		);
+
 		while(sample_iter.has_next()) {
 			int i = sample_iter.i;
 			error.data[i] = input.data[i] - output.data[i];
 			sample_iter.next();
 		}
+	}
+	file_image to_byte_image(variable_image_tiled<float>& sample, bool clamp_to_sample_area) {
+		file_image image;
+		image.X = sample.X;
+		image.Y = sample.Y;
+		image.C = sample.C;
+		image.data.resize(image.X * image.Y * image.C);
+
+		variable_image_tile_iterator sample_iter = clamp_to_sample_area ? sample.get_iterator(
+			sample.x0, sample.x1,
+			sample.y0, sample.y1,
+			0, image.C
+		) : sample.get_iterator(
+			0, image.X,
+			0, image.Y,
+			0, image.C
+		);
+
+		const float m = 255.0f / 1.0f;
+		while(sample_iter.has_next()) {
+			int ofs = image.get_offset(sample_iter.x, sample_iter.y, sample_iter.c);
+			image.data[ofs] = sample.data[sample_iter.i] * m;
+			sample_iter.next();
+		}
+		return image;
 	}
 }
 

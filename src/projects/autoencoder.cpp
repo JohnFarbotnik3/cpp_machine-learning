@@ -76,10 +76,16 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 	}
 
 	// run training cycle.
-	ML::image::sample_image image_input (model.input_w, model.input_h);
-	ML::image::sample_image image_output(model.input_w, model.input_h);
-	ML::image::sample_image image_error (model.input_w, model.input_h);
-	ML::image::sample_image image_temp  (model.input_w, model.input_h);
+	int X = model.input_dimensions.X;
+	int Y = model.input_dimensions.Y;
+	int C = model.input_dimensions.C;
+	int TX = model.input_dimensions.TX;
+	int TY = model.input_dimensions.TY;
+	int TC = model.input_dimensions.TC;
+	ML::image::variable_image_tiled<float> image_input (X, Y, C, TX, TY, TC);
+	ML::image::variable_image_tiled<float> image_output(X, Y, C, TX, TY, TC);
+	ML::image::variable_image_tiled<float> image_error (X, Y, C, TX, TY, TC);
+	ML::image::variable_image_tiled<float> image_temp  (X, Y, C, TX, TY, TC);
 	for(const auto& minibatch : image_minibatches) {
 		// run minibatch.
 		assert(minibatch.size() > 0);
@@ -95,7 +101,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 
 			// generate sample.
 			t0 = timepoint::now();
-			ML::image::generate_sample_image(loaded_image, image_input);
+			ML::image::generate_sample_image(image_input, loaded_image);
 			t1 = timepoint::now();
 			settings.stats.push_value("dt gen sample", t1.delta_us(t0));
 
@@ -233,6 +239,7 @@ int main(const int argc, const char** argv) {
 	string output_dir = arguments.named_arguments.at("-o");
 	int input_w = arguments.get_named_value("-w", 512);
 	int input_h = arguments.get_named_value("-h", 512);
+	int input_c = arguments.get_named_value("-channels", 4);
 	int n_training_cycles = arguments.get_named_value("-tc", 20);
 	int training_print_itv = arguments.get_named_value("-tcp", 1);
 	int pmp = arguments.get_named_value("-pmp", 1);
@@ -244,7 +251,8 @@ int main(const int argc, const char** argv) {
 
 	// create and initialize model.
 	printf("initializing model.\n");
-	ML::models::autoencoder model(input_w, input_h);
+	ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, 4, 4, 1);
+	ML::models::autoencoder model(input_dimensions);
 	model.init_model_parameters(settings.seed, 0.0f, 0.3f, 0.0f, 0.2f);
 	printf("==============================\n");
 	if(pmp) print_model_parameters(model);
@@ -255,6 +263,7 @@ int main(const int argc, const char** argv) {
 	settings.image_entries = ML::image::get_image_entries_in_directory(input_dir);
 	printf("found %lu images.\n", settings.image_entries.size());
 
+	///*
 	// train model.
 	printf("starting training.\n");
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
@@ -284,19 +293,28 @@ int main(const int argc, const char** argv) {
 	if(pmp) print_model_parameters(model);
 	settings.stats.clear_all();
 	printf("------------------------------\n");
+	//*/
 
 	// test model by outputting images.
 	printf("outputting decoded images.\n");
-	ML::image::sample_image image_input (model.input_w, model.input_h);
-	ML::image::sample_image image_output(model.input_w, model.input_h);
+	int X = model.input_dimensions.X;
+	int Y = model.input_dimensions.Y;
+	int C = model.input_dimensions.C;
+	int TX = model.input_dimensions.TX;
+	int TY = model.input_dimensions.TY;
+	int TC = model.input_dimensions.TC;
+	ML::image::variable_image_tiled<float> image_input (X, Y, C, TX, TY, TC);
+	ML::image::variable_image_tiled<float> image_output(X, Y, C, TX, TY, TC);
 	for(const fs::directory_entry entry : settings.image_entries) {
-		// load and propagate.
+		// load image.
 		ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string());
-		ML::image::generate_sample_image(loaded_image, image_input);
+		ML::image::generate_sample_image(image_input, loaded_image);
+		// propagate.
 		model.propagate(settings.n_threads, image_input.data, image_output.data);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
-		ML::image::file_image output = image_output.to_byte_image();
+		ML::image::file_image output = ML::image::to_byte_image(image_output, false);
+		//ML::image::file_image output = ML::image::to_byte_image(image_input);// TEST
 		ML::image::file_image::save(output, outpath.string(), 4);
 	}
 	printf("done.\n");

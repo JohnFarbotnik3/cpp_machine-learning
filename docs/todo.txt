@@ -52,6 +52,17 @@ as it gives clues about what the layer is for, as well as hinting at preferred m
 
 
 
+> alternative to graph:
+- use multiple images instead of huge amorphous graph.
+- each layer Z has connections pointing to layers { INPUT, OUTPUT, Z-1, Z, Z+1 }.
+
+
+> graph multithreading - partitions:
+- if the graph can be partitioned such that the vast majority of the connections
+in each partition point to other neurons in the same partition, with only a few pointing externally,
+the that would allow decent multithreading.
+
+
 > debug autoencoder.
 - implement model saving and loading (plus a snapshot interval for intermediate model states).
 - check if lowering ReLU leakage speeds of the slow half of the learning process.
@@ -73,8 +84,33 @@ useful information about program hotspots.
 - test image iterators (by printing indices and coordinates).
 - create variable_image.
 - use variable_image in autoencoder (mostly replacing sample_image).
+*** currently connections make up majority of memory usage and memory pressure,
+	however using a value+signal history equal to batch size would allow loading each
+	neuron's connection list once, then processing multiple images,
+	then backpropagating for each of the images.
+	^ this would allow removing the batch-error accumulators, significantly reducing memory usage;
+	and backprop would directly apply adjustments instead.
+	^ back-targets could be removed completely and write-style
+	backprop could be used (but then it would become single threaded).
+	^ neurons could store history of values and signals inside itself
+	so that images dont need to be interleaved.
+	^ outside source can keep track of current history number,
+	sending it to prop and backprop functions so they know
+	which history entry to populate, or how many to backprop for.
+	(this is also useful for cases where minibatches occasionally have odd sizes.)
+	^ history could be stored in its own vector image, but with H times the number of channels.
+	the index to access would then be neuron_index * H.
+	^ fixed architecture layers would reduce memory consumption considerably as well,
+	but would involve using iterators extensively, increasing cpu load.
+	(each layer would have values keeping track of which iterator and iterator-parameters to use.)
+	^ multi-threaded backprop may still benefit from target indices since inverse mapping
+	could be complicated, particularly around edges of image.
 ...
 
+
+> misc
+- add a dense connection push-layer function (all inputs connected to all outputs).
+- autoencoder: experiment with lower bias values and lower ReLU leakage.
 
 
 

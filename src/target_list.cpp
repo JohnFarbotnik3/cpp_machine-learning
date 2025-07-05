@@ -84,18 +84,18 @@ namespace ML::target_list {
 			}
 		}
 
-		backprop_target_list get_inverse(const int input_size) {
+		backprop_target_list get_inverse(const int input_length) {
 			// get number of back-targets for each input neuron.
-			std::vector<int> lengths(input_size);
-			for(int x=0;x<input_size;x++) lengths[x] = 0;
+			std::vector<int> lengths(input_length);
+			for(int x=0;x<input_length;x++) lengths[x] = 0;
 			for(int x=0;x<this->targets.size();x++) lengths[this->targets[x].neuron_index]++;
 
 			// initialize backprop target list.
 			backprop_target_list list;
-			list.offsets.resize(input_size + 1);
+			list.offsets.resize(input_length + 1);
 			list.targets.resize(this->targets.size());
 			int position = 0;
-			for(int x=0;x<input_size;x++) {
+			for(int x=0;x<input_length;x++) {
 				list.offsets[x] = position;
 				position += lengths[x];
 			}
@@ -113,11 +113,11 @@ namespace ML::target_list {
 
 			// set offsets to their correct values.
 			position = 0;
-			for(int x=0;x<input_size;x++) {
+			for(int x=0;x<input_length;x++) {
 				list.offsets[x] = position;
 				position += lengths[x];
 			}
-			list.offsets[input_size] = list.targets.size();
+			list.offsets[input_length] = list.targets.size();
 
 			return list;
 		}
