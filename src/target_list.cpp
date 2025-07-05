@@ -14,8 +14,6 @@ namespace ML::target_list {
 	struct backprop_target {
 		int neuron_index	= 0;	// index of output neuron.
 		int target_index	= 0;	// index of related foreward_target.
-		float weight		= 0;	// copy of weight from corresponding foreward_target.
-		float weight_error	= 0;	// error accumulator (total adjustment to apply to foreward_target weight).
 	};
 
 	// interval of targets in a target list.

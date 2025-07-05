@@ -610,6 +610,7 @@ namespace ML::image {
 			0, input.C
 		);
 
+		// TODO - remove iterator, it doesnt seem to be needed.
 		if(loss_squared) while(sample_iter.has_next()) {
 			int i = sample_iter.i;
 			const float delta = input.data[i] - output.data[i];

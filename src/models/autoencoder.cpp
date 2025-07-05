@@ -14,24 +14,25 @@
 namespace ML::models {
 	using std::vector;
 	using namespace ML::image;
-
-	using namespace target_list;
-
-	struct layer_neuron {
-		float signal 	= 0;// sum of input activations and bias - used for backpropagation.
-		float bias		= 0;// bias of neuron[x] in the network.
-		float bias_error= 0;// cumulative adjustment to apply to bias.
-	};
+	using namespace ML::target_list;
 
 	/*
 	 a * single layer network of forward-connected neurons.
 	 NOTE: this network is intended to be populated externally.
 	 */
-	struct layer_network : ML::models::network {
-		std::vector<layer_neuron> neurons;
-		std::vector<float> signal_error_terms;
+	struct layer_network {
+		std::vector<float> biases;
+		vector<vector<float>> signal_history;		// sequence of signal images.
+		vector<vector<float>> signal_error_terms;	// error terms used for backpropagation.
 		foreward_target_list foreward_targets;
 		backprop_target_list backprop_targets;// inverse of this layer's foreward_targets.
+
+		// TODO - remember to call this function when creating model.
+		void set_history_length(int history_length) {
+			int len = biases.size() * history_length;
+			signal_history.resize(len);
+			signal_error_terms.resize(len);
+		}
 
 		// ============================================================
 		// activation functions.
@@ -63,25 +64,6 @@ namespace ML::models {
 		// network functions
 		// ------------------------------------------------------------
 
-		void apply_batch_error(float rate) override {
-			const float BIAS_LIMIT = 5.0f;
-			const float WEIGHT_LIMIT = 100.0f;
-			for(int n=0;n<neurons.size();n++) {
-				layer_neuron& neuron = neurons[n];
-				neuron.bias += neuron.bias_error * rate;
-				neuron.bias  = std::clamp(neuron.bias, -BIAS_LIMIT, +BIAS_LIMIT);
-				neuron.bias_error = 0;
-			}
-			for(int x=0;x<backprop_targets.targets.size();x++) {
-				backprop_target& bt = backprop_targets.targets[x];
-				bt.weight += bt.weight_error * rate;
-				bt.weight  = std::clamp(bt.weight, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
-				bt.weight_error = 0;
-			}
-			// NOTE: load_weights() is quite expensive.
-			foreward_targets.load_weights(backprop_targets);
-		}
-
 		static vector<int> generate_intervals(int n_threads, int length) {
 			vector<int> intervals;
 			for(int x=0;x<n_threads;x++) intervals.push_back(x * (length / n_threads));
@@ -89,90 +71,87 @@ namespace ML::models {
 			return intervals;
 		}
 
-		static void propagate_func(
-			const vector<float>& input_values,
-			vector<float>& output_values,
-			vector<layer_neuron>& neurons,
-			foreward_target_list& foreward_targets,
-			int n_beg,
-			int n_end
-		) {
+		static void propagate_func(layer_network& layer, const vector<float>& input_values, vector<float>& output_values, const int history_index, const int o_beg, int const o_end) {
 			// compute activations.
-			for(int n=n_beg;n<n_end;n++) {
-				layer_neuron& neuron = neurons[n];
-				float sum = neuron.bias;
-				const target_itv itv = foreward_targets.get_interval(n);
+			for(int n=o_beg;n<o_end;n++) {
+				float sum = layer.biases[n];
+				const target_itv itv = layer.foreward_targets.get_interval(n);
 				for(int i=itv.beg;i<itv.end;i++) {
-					const foreward_target& target = foreward_targets.targets[i];
+					const foreward_target& target = layer.foreward_targets.targets[i];
 					sum += target.weight * input_values[target.neuron_index];
 				}
-				neuron.signal = sum;
+				const int IMAGE_SIZE = layer.biases.size();
+				layer.signal_history[history_index][history_index * IMAGE_SIZE + n] = sum;
 				output_values[n] = activation_func(sum);
 			}
 		}
 
-		void propagate(const int n_threads, const std::vector<float>& input_values, std::vector<float>& output_values) override {
+		void propagate(const int n_threads, const int history_index, const std::vector<float>& input_values, std::vector<float>& output_values) {
 			// spawn threads.
-			vector<int> intervals = generate_intervals(n_threads, neurons.size());
+			const int IMAGE_SIZE = biases.size();
+			vector<int> intervals = generate_intervals(n_threads, IMAGE_SIZE);
 			vector<std::thread> threads;
 			for(int x=0;x<n_threads;x++) {
-				threads.push_back(std::thread(
-					propagate_func,
-					std::ref(input_values),
-					std::ref(output_values),
-					std::ref(this->neurons),
-					std::ref(this->foreward_targets),
-					intervals[x],
-					intervals[x+1]
-				));
+				int n_beg = intervals[x];
+				int n_end = intervals[x+1];
+				threads.push_back(std::thread(propagate_func, std::ref(*this), std::ref(input_values), std::ref(output_values), history_index, n_beg, n_end));
 			}
 			for(int x=0;x<n_threads;x++) threads[x].join();
 		}
 
-		static void back_propagate_func_0(
-			const vector<float>& output_error,
-			vector<float>& signal_error_terms,
-			vector<layer_neuron>& neurons,
-			const int n_beg,
-			const int n_end
-		) {
-			// compute signal error terms of output neurons.
-			for(int n=n_beg;n<n_end;n++) {
-				const float signal_error_term = output_error[n] * activation_derivative(neurons[n].signal);
-				signal_error_terms[n] = signal_error_term;
-				neurons[n].bias_error += signal_error_term;
+		static void back_propagate_func_output_side(layer_network& layer, const vector<vector<float>>& output_error_history, const int history_length, const float learning_rate, const int o_beg, const int o_end) {
+			// compute signal error terms.
+			for(int z=0;z<history_length;z++) {
+				const vector<float>& out_error_history = output_error_history[z];
+				const vector<float>& out_signal_history = layer.signal_history[z];
+				vector<float>& out_error_terms = layer.signal_error_terms[z];
+				for(int n=o_beg;n<o_end;n++) {
+					out_error_terms[n] = out_error_history[n] * activation_derivative(out_signal_history[n]);
+				}
+			}
+
+			// adjust biases.
+			const float BIAS_LIMIT = 5.0f;
+			for(int n=o_beg;n<o_end;n++) {
+				float sum = 0;
+				for(int z=0;z<history_length;z++) {
+					sum += layer.signal_error_terms[z][n];
+				}
+				layer.biases[n] = std::clamp(layer.biases[n] + (sum * learning_rate), -BIAS_LIMIT, +BIAS_LIMIT);
 			}
 		}
 
-		static void back_propagate_func_1(
-			const vector<float>& output_error,
-			vector<float>& input_error,
-			const vector<float>& input_values,
-			const vector<float>& signal_error_terms,
-			backprop_target_list& backprop_targets,
-			const int n_beg,
-			const int n_end
-		) {
-			// back propagate input error.
-			for(int n=n_beg;n<n_end;n++) {
-				float input_error_sum = 0;
-				const target_itv itv = backprop_targets.get_interval(n);
+		static void back_propagate_func_input_side(layer_network& layer, vector<vector<float>>& input_error_history, const int history_length, const float learning_rate, const int i_beg, const int i_end) {
+			// for each neuron (or value) in input...
+			const float WEIGHT_LIMIT = 100.0f;
+			for(int n=i_beg;n<i_end;n++) {
+				// adjust weights and gather input error sums.
+				vector<float> ie_sums(history_length);
+				for(int z=0;z<history_length;z++) ie_sums[z] = 0;
+				const target_itv itv = layer.backprop_targets.get_interval(n);
 				const float mult = 1.0f / (itv.end - itv.beg);
-				const float value = input_values[n];
 				for(int x=itv.beg;x<itv.end;x++) {
-					backprop_target& bt = backprop_targets.targets[x];
-					const float signal_error_term = signal_error_terms[bt.neuron_index];
-					input_error_sum += signal_error_term * mult * bt.weight;
+					backprop_target& bt = layer.backprop_targets.targets[x];
+					foreward_target& ft = layer.foreward_targets.targets[bt.target_index];
+					const int out_n = bt.neuron_index;
+					float w_sum = 0;
+					for(int z=0;z<history_length;z++) {
+						float error_term = layer.signal_error_terms[z][out_n];
+						float out_value = activation_func(layer.signal_history[z][out_n]);
+						ie_sums[z] += error_term * mult * ft.weight;
+						w_sum      += error_term * mult * out_value;
+					}
+					// adjust target weight.
+					ft.weight = std::clamp(ft.weight + (w_sum * learning_rate), -WEIGHT_LIMIT, +WEIGHT_LIMIT);
 				}
-				for(int x=itv.beg;x<itv.end;x++) {
-					backprop_target& bt = backprop_targets.targets[x];
-					const float signal_error_term = signal_error_terms[bt.neuron_index];
-					bt.weight_error += signal_error_term * mult * value;
+				// set input error.
+				for(int z=0;z<history_length;z++) {
+					input_error_history[z][n] = ie_sums[z];
 				}
-				input_error[n] = input_error_sum;
 			}
 		}
 
+		// TODO - continue overhaul from here...
 		/*
 			for backprop derivation, see:
 			https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
@@ -182,7 +161,7 @@ namespace ML::models {
 			std::vector<float>& output_error,
 			std::vector<float>& input_error,
 			std::vector<float>& input_values
-		) override {
+		) {
 			assert(output_error.size() == neurons.size());
 			assert( input_error.size() == input_values.size());
 			assert(output_error.size() > 0);
@@ -199,7 +178,7 @@ namespace ML::models {
 				vector<std::thread> threads;
 				for(int x=0;x<n_threads;x++) {
 					threads.push_back(std::thread(
-						back_propagate_func_0,
+						back_propagate_compute_error_terms,
 						std::ref(output_error),
 						std::ref(signal_error_terms),
 						std::ref(this->neurons),
@@ -249,7 +228,7 @@ namespace ML::models {
 		}
 	};
 
-	struct autoencoder : network {
+	struct autoencoder {
 		using layer_image = ML::image::variable_image_tiled<float>;
 		using layer_image_iterator = ML::image::variable_image_tile_iterator;
 
@@ -445,11 +424,11 @@ namespace ML::models {
 			}
 		}
 
-		void apply_batch_error(float rate) override {
+		void apply_batch_error(float rate) {
 			for(int x=0;x<layers.size();x++) layers[x].apply_batch_error(rate);
 		}
 
-		void propagate(const int n_threads, const std::vector<float>& input_values, std::vector<float>& output_values) override {
+		void propagate(const int n_threads, const std::vector<float>& input_values, std::vector<float>& output_values) {
 			// first layer.
 			layers[0].propagate(n_threads, input_values, layer_values[0].data);
 			// middle layers.
@@ -460,7 +439,7 @@ namespace ML::models {
 			memcpy(output_values.data(), layer_values[layer_values.size()-1].data.data(), output_values.size() * sizeof(float));
 		}
 
-		void back_propagate(const int n_threads, std::vector<float>& output_error, std::vector<float>& input_error, std::vector<float>& input_values) override {
+		void back_propagate(const int n_threads, std::vector<float>& output_error, std::vector<float>& input_error, std::vector<float>& input_values) {
 			// copy output.
 			memcpy(layer_errors[layer_errors.size()-1].data.data(), output_error.data(), output_error.size() * sizeof(float));
 			// middle layers.
