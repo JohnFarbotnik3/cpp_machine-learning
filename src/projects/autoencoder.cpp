@@ -88,6 +88,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 	for(const auto& minibatch : image_minibatches) {
 		// run minibatch.
 		assert(minibatch.size() > 0);
+		timepoint tb0 = timepoint::now();
 		for(const auto& entry : minibatch) {
 			timepoint t0;
 			timepoint t1;
@@ -131,6 +132,8 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 		model.apply_batch_error(settings.learning_rate / minibatch.size());
 		timepoint t1 = timepoint::now();
 		settings.stats.push_value("dt apply error", t1.delta_us(t0));
+		timepoint tb1 = timepoint::now();
+		settings.stats.push_value("dt training batch", tb1.delta_us(tb0));
 	}
 }
 
@@ -248,7 +251,7 @@ int main(const int argc, const char** argv) {
 
 	// create and initialize model.
 	printf("initializing model.\n");
-	ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, 4, 4, 1);
+	ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, 4, 4, input_c);
 	ML::models::autoencoder model(input_dimensions);
 	model.init_model_parameters(settings.seed, 0.0f, 0.3f, 0.0f, 0.2f);
 	printf("==============================\n");
@@ -276,7 +279,7 @@ int main(const int argc, const char** argv) {
 			printf("------------------------------\n");
 		}
 		// update learning rate.
-		if(z % tadjustlr_itv == 0) {
+		if(z % tadjustlr_itv == 0 && z > 0) {
 			printf("updating learning rate:\n");
 			update_learning_rate(model, settings, tadjustlr_len);
 			printf("new learning rate: %f\n", settings.learning_rate);

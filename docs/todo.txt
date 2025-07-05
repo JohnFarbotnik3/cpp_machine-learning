@@ -111,7 +111,8 @@ useful information about program hotspots.
 > misc
 - add a dense connection push-layer function (all inputs connected to all outputs).
 - autoencoder: experiment with lower bias values and lower ReLU leakage.
-
+- use different tiling in push-layer value-images based on whether or not values
+are being mixed.
 
 
 

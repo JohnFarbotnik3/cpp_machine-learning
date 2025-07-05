@@ -1,5 +1,6 @@
 
 #include <cassert>
+#include <cstring>
 #include <thread>
 #include <vector>
 #include <algorithm>
@@ -342,11 +343,16 @@ namespace ML::models {
 
 			NOTE: image dimensions A and B must be picked such that image scales cleanly.
 		*/
-		void push_layer_scale_AxA_to_BxB(const image_dimensions idim, const image_dimensions odim, const int A, const int B, bool mix_channels) {
+		void push_layer_scale_AxA_to_BxB(const image_dimensions idim, image_dimensions& odim, const int A, const int B, const int outC, bool mix_channels) {
 			// make sure images will scale cleanly, and have size compatible with choice of A and B.
 			// - images dimensions should be divisible by A (input) or B (output).
 			// - images should have the same number of AxA or BxB tiles as eachother in each dimension.
 			// - if not mixing channels, then output and input should have same number of channels.
+			odim = idim;
+			odim.X = (odim.X * B) / A;
+			odim.Y = (odim.Y * B) / A;
+			odim.C = outC;
+			odim.TC = outC;
 			assert(idim.X % A == 0);
 			assert(idim.Y % A == 0);
 			assert(odim.X % B == 0);
@@ -394,10 +400,7 @@ namespace ML::models {
 			// mix and condense image.
 			// (w, h) -> (w/32, h/32)
 			push_layer_mix_AxA_to_1x1(idim, 3, false);
-
-			odim = idim; odim.X/=2; odim.Y/=2;
-			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, true);
-			idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 6, true); idim = odim;
 			/*
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 2, true); in_dim = out_dim;
@@ -417,10 +420,7 @@ namespace ML::models {
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			//*/
 
-			odim = idim; odim.X*=2; odim.Y*=2;
-			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, true);
-			idim = odim;
-
+			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 4, true); idim = odim;
 			push_layer_mix_AxA_to_1x1(idim, 3, false);
 
 			assert(odim.X == idim.X);
@@ -457,12 +457,12 @@ namespace ML::models {
 				layers[z].propagate(n_threads, layer_values[z-1].data, layer_values[z].data);
 			}
 			// copy output.
-			output_values = layer_values[layer_values.size()-1].data;
+			memcpy(output_values.data(), layer_values[layer_values.size()-1].data.data(), output_values.size() * sizeof(float));
 		}
 
 		void back_propagate(const int n_threads, std::vector<float>& output_error, std::vector<float>& input_error, std::vector<float>& input_values) override {
 			// copy output.
-			layer_errors[layer_errors.size()-1].data = output_error;
+			memcpy(layer_errors[layer_errors.size()-1].data.data(), output_error.data(), output_error.size() * sizeof(float));
 			// middle layers.
 			for(int z=layer_values.size()-1;z>0;z--) layers[z].back_propagate(n_threads, layer_errors[z].data, layer_errors[z-1].data, layer_values[z-1].data);
 			// first layer.
