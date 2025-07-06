@@ -69,7 +69,7 @@ the that would allow decent multithreading.
 	^ with lower leakage, try higher learning rate?
 - add config file parsing (newline delimited KEY=VALUE pairs).
 - re-add middle layers to fully prove autoencoder effectiveness.
-
+- bug: trying "-channels 3" causes buggy output.
 
 > optimize autoencoder.
 * figure out why backprop (specifically the weights part) isnt scaling well with number of threads.

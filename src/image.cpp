@@ -37,43 +37,6 @@ namespace ML::image {
 	};
 
 	/*
-	int get_image_data_offset(int image_w, int image_h, int x, int y) {
-		return (y * image_w + x) * 4;
-	}
-	int get_image_data_length(int image_w, int image_h) {
-		return image_w * image_h * 4;
-	}
-
-	vector<int> generate_image_data_indices(int image_w, int image_h, int x, int y, int w, int h, int channel=-1) {
-		// clip to image area.
-		int x0 = std::max(x, 0);
-		int y0 = std::max(y, 0);
-		int x1 = std::min(x+w, image_w);
-		int y1 = std::min(y+h, image_h);
-		// generate indices.
-		vector<int> list;
-		for(int py=y0;py<y1;py++) {
-		for(int px=x0;px<x1;px++) {
-			int i = ((py*image_w) + px) * 4;
-			if(channel == -1) {
-				list.push_back(i+0);
-				list.push_back(i+1);
-				list.push_back(i+2);
-				list.push_back(i+3);
-			} else {
-				list.push_back(i+channel);
-			}
-		}}
-		// assert that all indices are within image bounds.
-		// WARNING: this doesnt necessarily mean they are correct.
-		for(int x=0;x<list.size();x++) {
-			assert(0 <= list[x] && list[x] < (image_w*image_h*4));
-		}
-		return list;
-	}
-	*/
-
-	/*
 		image containing RGBA byte data loaded from image files.
 		these are typically all loaded before training.
 
@@ -81,19 +44,17 @@ namespace ML::image {
 		and then converted to floats during sampling.
 	*/
 	struct file_image {
-		const int CH_DEFAULT = 4;
-
 		string path = "";
 		vector<byte> data = vector<byte>(0);
 		int X = 0;
 		int Y = 0;
 		int C = 0;
-		int ch_orig = 0;
+		int C_orig = 0;
 
 		void print() const {
 			printf("<loaded_image>\n");
 			printf("path   : %s\n", path.c_str());
-			printf("area   : %i x %i (%i -> %i channels)\n", X, Y, ch_orig, C);
+			printf("area   : %i x %i (%i -> %i channels)\n", X, Y, C_orig, C);
 			printf("memsize: %.3f MiB\n", float(data.size()*sizeof(byte))/(1024*1024));
 		}
 
@@ -113,10 +74,10 @@ namespace ML::image {
 			return temp;
 		}
 
-		static file_image load(string filepath) {
+		static file_image load(string filepath, int channels) {
 			file_image image;
-			image.C = image.CH_DEFAULT;
-			byte* imgdata = stbi_load(filepath.c_str(), &image.X, &image.Y, &image.ch_orig, image.C);
+			image.C = channels;
+			byte* imgdata = stbi_load(filepath.c_str(), &image.X, &image.Y, &image.C_orig, image.C);
 			if(imgdata == NULL) {
 				image.X=0;
 				image.Y=0;
@@ -163,15 +124,6 @@ namespace ML::image {
 			if(match) entries.push_back(entry);
 		}
 		return entries;
-	}
-
-	vector<file_image> load_images_in_directory(string dir) {
-		vector<fs::directory_entry> entries = get_image_entries_in_directory(dir);
-		vector<file_image> images;
-		for(const fs::directory_entry entry : entries) {
-			images.push_back(file_image::load(entry.path().string()));
-		}
-		return images;
 	}
 
 	/*
@@ -415,44 +367,6 @@ namespace ML::image {
 		}
 	};
 
-	/*
-	struct sample_image {
-		vector<float> data;
-		// dimensions of data.
-		int w = 0;
-		int h = 0;
-		// sample area.
-		int x0 = 0, x1 = 0;
-		int y0 = 0, y1 = 0;
-
-		sample_image(int w, int h) {
-			this->w = w;
-			this->h = h;
-			this->data = vector<float>(w*h*4);
-		}
-
-		void clear() {
-			for(int x=0;x<data.size();x++) data[x] = 0.0f;
-			x0 = x1 = 0;
-			y0 = y1 = 0;
-		}
-
-		int get_offset(int x, int y) const {
-			return (y*w + x) * 4;
-		}
-
-		file_image to_byte_image() {
-			file_image image;
-			image.data = vector<byte>(data.size());
-			image.w = w;
-			image.h = h;
-			const float m = 255.0f / 1.0f;
-			for(int x=0;x<data.size();x++) image.data[x] = byte(data[x] * m);
-			return image;
-		}
-	};
-	//*/
-
 	void sample_area_copy(variable_image_tiled<float>& sample, const file_image& image) {
 		// assert that image-area and sample-area match.
 		assert((sample.x1 - sample.x0) == image.X);
@@ -502,6 +416,8 @@ namespace ML::image {
 		vector<int> ceil__my(sample.Y+1);
 		vector<float> image_to_sample_x(image.X+1);
 		vector<float> image_to_sample_y(image.Y+1);
+		int max_int = std::max(image.X+1, image.Y+1);
+		vector<float> int_to_float(max_int);
 		{
 			float mx = float(image.X) / float(sample.x1 - sample.x0);
 			float my = float(image.Y) / float(sample.y1 - sample.y0);
@@ -511,6 +427,7 @@ namespace ML::image {
 			for(int p=0;p<=sample.Y;p++) ceil__my[p] = std::ceil(float(p) * my);
 			for(int p=0;p<=image.X;p++) image_to_sample_x[p] = float(p) / mx;
 			for(int p=0;p<=image.Y;p++) image_to_sample_y[p] = float(p) / my;
+			for(int x=0;x<max_int;x++) int_to_float[x] = float(x);
 		}
 
 		variable_image_tile_iterator sample_iter = sample.get_iterator(
@@ -521,31 +438,44 @@ namespace ML::image {
 
 		const float m = 1.0f / 255.0f;
 		while(sample_iter.has_next()) {
-			// gather weighted sum of image-pixel values according to
-			// area of intersection between sample-pixel and image-pixel.
 			int sx = sample_iter.x - sample_iter.x0;
 			int sy = sample_iter.y - sample_iter.y0;
 			int ix0 = floor_mx[sx];
 			int ix1 = ceil__mx[sx + 1];
 			int iy0 = floor_my[sy];
 			int iy1 = ceil__my[sy + 1];
-			// WARNING: the pixel area isnt clamped to input image.
-			// this may cause subtle bugs near edges, or perhaps a segfault.
-			float area_sum = 0;
-			for(int iy=iy0;iy<iy1;iy++) {
-			for(int ix=ix0;ix<ix1;ix++) {
+
+			// pre-compute intersection lengths independently for each axis.
+			const int ixlen = ix1 - ix0;
+			const int iylen = iy1 - iy0;
+			float intersect_lengths_x[ixlen];
+			float intersect_lengths_y[iylen];
+			for(int x=0;x<ixlen;x++) {
+				const int ix = x + ix0;
+				const float lx0 = std::max(image_to_sample_x[ix  ], int_to_float[sx  ]);
+				const float lx1 = std::min(image_to_sample_x[ix+1], int_to_float[sx+1]);
+				intersect_lengths_x[x] = lx1 - lx0;
+			}
+			for(int y=0;y<iylen;y++) {
+				const int iy = y + iy0;
+				const float ly0 = std::max(image_to_sample_y[iy  ], int_to_float[sy  ]);
+				const float ly1 = std::min(image_to_sample_y[iy+1], int_to_float[sy+1]);
+				intersect_lengths_y[y] = ly1 - ly0;
+			}
+
+			// gather weighted sum of image-pixel values according to
+			// area of intersection between sample-pixel and image-pixel.
+			float value_sum = 0;
+			for(int y=0;y<iylen;y++) {
+			for(int x=0;x<ixlen;x++) {
+				const int ix = x + ix0;
+				const int iy = y + iy0;
 				// compute area of intersection between scaled image-pixel and sample-pixel,
 				// normalized such that sample-pixel area=1.
-				float lx0 = std::max(image_to_sample_x[ix], float(sx));
-				float ly0 = std::max(image_to_sample_y[iy], float(sy));
-				float lx1 = std::min(image_to_sample_x[ix+1], float(sx+1));
-				float ly1 = std::min(image_to_sample_y[iy+1], float(sy+1));
-				float intersect_length_x = lx1 - lx0;
-				float intersect_length_y = ly1 - ly0;
-				float area = intersect_length_x * intersect_length_y;
-				sample.data[sample_iter.i] += image.data[image.get_offset(ix, iy, sample_iter.c)] * area * m;
-				area_sum += area;
+				const float area = intersect_lengths_x[x] * intersect_lengths_y[y];
+				value_sum += image.data[image.get_offset(ix, iy, sample_iter.c)] * area * m;
 			}}
+			sample.data[sample_iter.i] = value_sum;
 			sample_iter.next();
 		}
 	}

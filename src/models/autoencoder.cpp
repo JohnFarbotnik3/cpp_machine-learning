@@ -23,6 +23,7 @@ namespace ML::models {
 	struct layer_network {
 		// TODO - experiment with using signal_history to store error terms during backprop.
 		vector<float> biases;
+		vector<vector<float>> output_history; // sequence of output value images.
 		vector<vector<float>> signal_history; // sequence of signal images.
 		foreward_target_list foreward_targets;
 		backprop_target_list backprop_targets;// inverse of this layer's foreward_targets.
@@ -67,7 +68,7 @@ namespace ML::models {
 
 		static vector<int> generate_intervals(int n_threads, int length) {
 			vector<int> intervals;
-			for(int x=0;x<n_threads;x++) intervals.push_back(x * (length / n_threads));
+			for(int x=0;x<=n_threads;x++) intervals.push_back((x * length) / n_threads);
 			intervals.push_back(length);
 			return intervals;
 		}
@@ -75,6 +76,7 @@ namespace ML::models {
 		static void propagate_func(layer_network& layer, const vector<float>& input_values, vector<float>& output_values, const int history_index, const int o_beg, int const o_end) {
 			// compute activations.
 			const int IMAGE_SIZE = layer.image_size();
+			vector<float>& output_image = layer.output_history[history_index];
 			vector<float>& signal_image = layer.signal_history[history_index];
 			for(int n=o_beg;n<o_end;n++) {
 				float sum = layer.biases[n];
@@ -83,13 +85,18 @@ namespace ML::models {
 					const foreward_target ft = layer.foreward_targets.targets[i];
 					sum += ft.weight * input_values[ft.neuron_index];
 				}
+				const float output_value = activation_func(sum);
 				signal_image[n] = sum;
-				output_values[n] = activation_func(sum);
+				output_image[n] = output_value;
 			}
+			// copy output values.
+			memcpy(output_values.data() + o_beg, output_image.data() + o_beg, (o_end - o_beg) * sizeof(float));
 		}
 
 		void propagate(const int n_threads, const int history_index, const std::vector<float>& input_values, std::vector<float>& output_values) {
+			// ensure history buffer is large enough.
 			const int IMAGE_SIZE = biases.size();
+			while(history_index >= output_history.size()) output_history.emplace_back(IMAGE_SIZE);
 			while(history_index >= signal_history.size()) signal_history.emplace_back(IMAGE_SIZE);
 
 			// spawn threads.
@@ -125,7 +132,7 @@ namespace ML::models {
 			}
 		}
 
-		static void back_propagate_func_input_side(layer_network& layer, vector<vector<float>>& input_error_history, const vector<vector<float>>& signal_error_terms, const int history_length, const float learning_rate, const int i_beg, const int i_end) {
+		static void back_propagate_func_input_side(layer_network& layer, vector<vector<float>>& input_error_history, const vector<vector<float>>& input_value_history, const vector<vector<float>>& signal_error_terms, const int history_length, const float learning_rate, const int i_beg, const int i_end) {
 			// for each neuron (or value) in input...
 			const float WEIGHT_LIMIT = 100.0f;
 			for(int n=i_beg;n<i_end;n++) {
@@ -146,17 +153,17 @@ namespace ML::models {
 				float ie_sums[history_length];
 				for(int z=0;z<history_length;z++) ie_sums[z] = 0;
 
-				const float mult = 1.0f / itv_len;
 				for(int x=0;x<itv_len;x++) {
 					backprop_target& bt = bts[x];
 					foreward_target& ft = fts[x];
 					const int out_n = bt.neuron_index;
+					const int in_n = ft.neuron_index;
 					float we_sum = 0;// weight-error sum.
 					for(int z=0;z<history_length;z++) {
 						float error_term = signal_error_terms[z][out_n];
-						float out_value = activation_func(layer.signal_history[z][out_n]);
-						ie_sums[z] += error_term * mult * ft.weight;
-						we_sum     += error_term * mult * out_value;
+						float input_value = input_value_history[z][in_n];
+						ie_sums[z] += error_term * ft.weight;
+						we_sum     += error_term * input_value;
 					}
 					// adjust target weight.
 					ft.weight = std::clamp(ft.weight + (we_sum * learning_rate), -WEIGHT_LIMIT, +WEIGHT_LIMIT);
@@ -178,9 +185,11 @@ namespace ML::models {
 			const int n_threads,
 			const int history_length,
 			vector<vector<float>>& input_error_history,
-			vector<vector<float>>& output_error_history,
+			const vector<vector<float>>& input_value_history,
+			const vector<vector<float>>& output_error_history,
 			const float learning_rate
 		) {
+			//printf("back_propagate(): hlen=%i, isize=%lu, osize=%lu\n", history_length, input_error_history[0].size(), output_error_history[0].size());
 			if(history_length == 0) return;
 
 			// assertions.
@@ -236,6 +245,7 @@ namespace ML::models {
 						back_propagate_func_input_side,
 						std::ref(*this),
 						std::ref(input_error_history),
+						std::ref(input_value_history),
 						std::ref(signal_error_terms),
 						history_length,
 						learning_rate,
@@ -250,6 +260,7 @@ namespace ML::models {
 			// normalize input-error against output-error to have same average gradient per-neuron.
 			///*
 
+			// TODO - revert this back to normalizing against combined batch error (instead of per image error).
 			for(int z=0;z<history_length;z++) {
 				float in_sum = 0;
 				float out_sum = 0;
@@ -259,6 +270,7 @@ namespace ML::models {
 				assert(out_sum > 0.0f);
 				assert(in_sum > 0.0f);
 				for(int x=0;x< input_error_history[z].size();x++) input_error_history[z][x] *= mult;
+				//printf("error: z=%i, isum=%f, osum=%f\n", z, in_sum, out_sum);
 			}
 
 			timepoint t3 = timepoint::now();
@@ -414,8 +426,10 @@ namespace ML::models {
 
 			// mix and condense image.
 			// (w, h) -> (w/32, h/32)
-			push_layer_mix_AxA_to_1x1(idim, 3, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 4, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 1, false);// TEST
+			//push_layer_mix_AxA_to_1x1(idim, 3, false);
+			//push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 4, true); idim = odim;
+
 			/*
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 2, true); in_dim = out_dim;
@@ -435,8 +449,8 @@ namespace ML::models {
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			//*/
 
-			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 4, true); idim = odim;
-			push_layer_mix_AxA_to_1x1(idim, 3, false);
+			//push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 4, true); idim = odim;
+			//push_layer_mix_AxA_to_1x1(idim, 3, false);
 
 			assert(odim.X == idim.X);
 			assert(odim.Y == idim.Y);
@@ -464,6 +478,14 @@ namespace ML::models {
 			const int n_layers = layers.size();
 			assert( input_values.size() == layers[0].image_size());
 			assert(output_values.size() == layers[n_layers-1].image_size());
+			bool input_values_contains_nonzero = false;
+			for(int x=0;x<input_values.size();x++) {
+				if(input_values[x] != 0) {
+					input_values_contains_nonzero = true;
+					break;
+				}
+			}
+			assert(input_values_contains_nonzero);
 
 			vector<float> value_buffer_i;
 			vector<float> value_buffer_o;
@@ -481,21 +503,38 @@ namespace ML::models {
 			}
 
 			// copy output.
-			memcpy(output_values.data(), value_buffer_o.data(), output_values.size() * sizeof(float));
+			memcpy(output_values.data(), value_buffer_i.data(), output_values.size() * sizeof(float));
 		}
 
-		void generate_error_image(const vector<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared) {
-			assert(input.size() == output.size());
-			assert(error.size() == output.size());
+		void generate_error_image(const variable_image_tiled<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared) {
+			// assertions.
+			const int IMAGE_SIZE = input.X * input.Y * input.C;
+			assert(input.data.size() == IMAGE_SIZE);
+			assert(output.size() == IMAGE_SIZE);
+			assert(error.size() == IMAGE_SIZE);
+
+			// clear error image.
+			for(int x=0;x<IMAGE_SIZE;x++) error[x] = 0;
+
+			variable_image_tile_iterator sample_iter = input.get_iterator(
+				input.x0, input.x1,
+				input.y0, input.y1,
+				0, input.C
+			);
+
 			if(loss_squared) {
-				for(int x=0;x<output.size();x++) {
-					const float delta = input[x] - output[x];
-					error[x] = delta * std::abs(delta);
+				while(sample_iter.has_next()) {
+					int i = sample_iter.i;
+					const float delta = input.data[i] - output[i];
+					error[i] = delta * std::abs(delta);
+					sample_iter.next();
 				}
 			} else {
-				for(int x=0;x<output.size();x++) {
-					const float delta = input[x] - output[x];
-					error[x] = delta;
+				while(sample_iter.has_next()) {
+					int i = sample_iter.i;
+					const float delta = input.data[i] - output[i];
+					error[i] = delta;
+					sample_iter.next();
 				}
 			}
 		}
@@ -505,7 +544,7 @@ namespace ML::models {
 			for(int x=0;x<X;x++) vec[x].resize(Y);
 		}
 
-		void back_propagate(const int n_threads, const int history_length, vector<vector<float>>& input_error_history, const vector<vector<float>>& output_error_history, const float learning_rate) {
+		void back_propagate(const int n_threads, const int history_length, vector<vector<float>>& input_error_history, const vector<vector<float>>& input_value_history,  const vector<vector<float>>& output_error_history, const float learning_rate) {
 			// assertions.
 			if(history_length == 0) return;
 			assert(input_error_history.size() >= history_length);
@@ -518,6 +557,16 @@ namespace ML::models {
 				assert( input_error_history[z].size() == IMAGE_SIZE_I);
 				assert(output_error_history[z].size() == IMAGE_SIZE_O);
 			}
+			bool input_history_contains_nonzero = false;
+			for(int z=0;z<history_length && !input_history_contains_nonzero;z++) {
+				for(int x=0;x<input_value_history[z].size();x++) {
+					if(input_value_history[z][x] != 0) {
+						input_history_contains_nonzero = true;
+						break;
+					}
+				}
+			}
+			assert(input_history_contains_nonzero);
 
 			vector<vector<float>> errhist_buffer_i;
 			vector<vector<float>> errhist_buffer_o;
@@ -532,11 +581,11 @@ namespace ML::models {
 			// middle layers.
 			for(int L=n_layers-1;L>0;L--) {
 				resize_2d(errhist_buffer_i, history_length, layers[L-1].image_size());
-				layers[L].back_propagate(n_threads, history_length, errhist_buffer_i, errhist_buffer_o, learning_rate);
+				layers[L].back_propagate(n_threads, history_length, errhist_buffer_i, layers[L-1].output_history, errhist_buffer_o, learning_rate);
 				std::swap(errhist_buffer_i, errhist_buffer_o);
 			}
 			// first layer.
-			layers[0].back_propagate(n_threads, history_length, input_error_history, errhist_buffer_o, learning_rate);
+			layers[0].back_propagate(n_threads, history_length, input_error_history, input_value_history, errhist_buffer_o, learning_rate);
 		}
 	};
 }

@@ -4,6 +4,7 @@
 #include "../stats.cpp"
 #include "../models/autoencoder.cpp"
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <string>
 
@@ -64,7 +65,33 @@ void print_usage(string msg) {
 	printf("-m MODELS_DIR -i INPUT_IMAGES_DIR -o OUTPUT_IMAGES_DIR\n");
 }
 
-void training_cycle(ML::models::autoencoder& model, training_settings& settings) {
+struct sample_image_cache {
+	using file_image_t = ML::image::file_image;
+
+	std::map<string, file_image_t> files;
+	std::map<string, model_image_t> samples;
+
+	bool has_file(const string path) {
+		return files.contains(path);
+	}
+	ML::image::file_image& get_file(const string path, int channels) {
+		if(files.contains(path)) return files.at(path);
+		files.insert_or_assign(path, file_image_t::load(path, channels));
+		return files.at(path);
+	}
+
+	bool has_sample(const string path) {
+		return samples.contains(path);
+	}
+	model_image_t get_sample(const string path, model_image_t& sample_buffer, const file_image_t& loaded_image) {
+		if(samples.contains(path)) return samples.at(path);
+		ML::image::generate_sample_image(sample_buffer, loaded_image);
+		samples.insert_or_assign(path, sample_buffer);
+		return samples.at(path);
+	}
+};
+
+void training_cycle(ML::models::autoencoder& model, training_settings& settings, sample_image_cache& cache) {
 	// divide image entries into batches.
 	vector<fs::directory_entry> pool = settings.image_entries;
 	vector<vector<fs::directory_entry>> image_minibatches;
@@ -87,13 +114,15 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 	int TX = model.input_dimensions.TX;
 	int TY = model.input_dimensions.TY;
 	int TC = model.input_dimensions.TC;
-	vector<model_image_t> image_input;
+	vector<model_image_t> image_input_img;
+	vector<vector<float>> image_input;
 	vector<vector<float>> image_output;
 	vector<vector<float>> image_error;
 	vector<vector<float>> image_temp;
 	for(int z=0;z<settings.minibatch_size;z++) {
-		const int IMAGE_SIZE = X * Y * C;
-		image_input .emplace_back(X, Y, C, TX, TY, TC);
+		image_input_img.emplace_back(X, Y, C, TX, TY, TC);
+		const int IMAGE_SIZE = image_input_img[z].data.size();
+		image_input .emplace_back(IMAGE_SIZE);
 		image_output.emplace_back(IMAGE_SIZE);
 		image_error .emplace_back(IMAGE_SIZE);
 		image_temp  .emplace_back(IMAGE_SIZE);
@@ -104,11 +133,13 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 
 		// load images and generate samples.
 		for(int z=0;z<minibatch.size();z++) {
-			timepoint t0 = timepoint::now();
 			const auto& entry = minibatch[z];
-			ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string());
+			const string path = entry.path().string();
+			timepoint t0 = timepoint::now();
+			ML::image::file_image loaded_image = cache.get_file(path, C);
 			timepoint t1 = timepoint::now();
-			ML::image::generate_sample_image(image_input[z], loaded_image);
+			image_input_img[z] = cache.get_sample(path, image_input_img[z], loaded_image);
+			memcpy(image_input[z].data(), image_input_img[z].data.data(), image_input[z].size() * sizeof(float));
 			timepoint t2 = timepoint::now();
 			settings.stats.push_value("dt load image", t1.delta_us(t0));
 			settings.stats.push_value("dt gen sample", t2.delta_us(t1));
@@ -117,7 +148,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 		// propagate.
 		for(int z=0;z<minibatch.size();z++) {
 			timepoint t0 = timepoint::now();
-			model.propagate(settings.n_threads, z, image_input[z].data, image_output[z]);
+			model.propagate(settings.n_threads, z, image_input[z], image_output[z]);
 			timepoint t1 = timepoint::now();
 			settings.stats.push_value("dt propagate", t1.delta_us(t0));
 		}
@@ -125,7 +156,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 		// compute error.
 		for(int z=0;z<minibatch.size();z++) {
 			timepoint t0 = timepoint::now();
-			model.generate_error_image(image_input[z].data, image_output[z], image_error[z], true);
+			model.generate_error_image(image_input_img[z], image_output[z], image_error[z], true);
 			float avg_error = 0;
 			for(int x=0;x<image_error[z].size();x++) avg_error += std::abs(image_error[z][x]);
 			avg_error /= image_error[z].size();
@@ -136,7 +167,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 
 		// backpropagate.
 		timepoint t0 = timepoint::now();
-		model.back_propagate(settings.n_threads, minibatch.size(), image_temp, image_error, settings.learning_rate / minibatch.size());
+		model.back_propagate(settings.n_threads, minibatch.size(), image_temp, image_input, image_error, settings.learning_rate / minibatch.size());
 		timepoint t1 = timepoint::now();
 		settings.stats.push_value("dt backprop", t1.delta_us(t0));
 
@@ -145,17 +176,17 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 	}
 }
 
-void update_learning_rate(ML::models::autoencoder& model, training_settings& settings, int cycles) {
+void update_learning_rate(ML::models::autoencoder& model, training_settings& settings, int cycles, sample_image_cache& cache) {
 	float best_pct_error;
 	training_settings best_settings = settings;
 	ML::models::autoencoder best_model = model;
 
-	vector<float> lr_mults { 1.0/1.5, 1.0/1.2, 1.0, 1.0*1.2, 1.0*1.5};
+	vector<float> lr_mults { 1.0/2.0, 1.0/1.2, 1.0, 1.0*1.2, 1.0*2.0};
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		ML::models::autoencoder test_model = model;
 		test_settings.learning_rate = settings.learning_rate * lr_mults[z];
-		printf("trying rate = %f\n", test_settings.learning_rate); for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings);
+		printf("trying rate = %f\n", test_settings.learning_rate); for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings, cache);
 		const vector<int> percentiles { 20 };
 		float pct_error = ML::stats::get_percentile_values(percentiles, test_settings.stats.groups.at("avg error"))[0];
 		if(pct_error < best_pct_error || z == 0) {
@@ -251,8 +282,10 @@ int main(const int argc, const char** argv) {
 	// create and initialize model.
 	printf("initializing model.\n");
 	ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, 4, 4, input_c);
+	//ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, input_w/2, input_h/2, input_c);// TEST
 	ML::models::autoencoder model(input_dimensions);
 	model.init_model_parameters(settings.seed, 0.0f, 0.3f, 0.0f, 0.2f);
+	//model.init_model_parameters(settings.seed, 0.0f, 0.0f, 1.0f, 0.5f);// TEST
 	printf("==============================\n");
 	if(pmp) print_model_parameters(model);
 	printf("------------------------------\n");
@@ -265,11 +298,12 @@ int main(const int argc, const char** argv) {
 	///*
 	// train model.
 	printf("starting training.\n");
+	sample_image_cache cache;
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
 	for(int z=0;z<n_training_cycles;z++) {
 		// run training batch.
 		printf("training cycle: %i / %i.\n", z, n_training_cycles);
-		training_cycle(model, settings);
+		training_cycle(model, settings, cache);
 		// print stats.
 		if(z % training_print_itv == 0) {
 			printf("==============================\n");
@@ -281,7 +315,7 @@ int main(const int argc, const char** argv) {
 		// update learning rate.
 		if(z % tadjustlr_itv == 0 && (z > 0 || tadjustlr_ini)) {
 			printf("updating learning rate:\n");
-			update_learning_rate(model, settings, tadjustlr_len);
+			update_learning_rate(model, settings, tadjustlr_len, cache);
 			printf("new learning rate: %f\n", settings.learning_rate);
 			z += tadjustlr_len;
 		}
@@ -306,15 +340,15 @@ int main(const int argc, const char** argv) {
 	ML::image::variable_image_tiled<float> image_output(X, Y, C, TX, TY, TC);
 	for(const fs::directory_entry entry : settings.image_entries) {
 		// load image.
-		ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string());
+		ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string(), C);
 		ML::image::generate_sample_image(image_input, loaded_image);
 		// propagate.
 		model.propagate(settings.n_threads, 0, image_input.data, image_output.data);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output = ML::image::to_byte_image(image_output, false);
-		//ML::image::file_image output = ML::image::to_byte_image(image_input);// TEST
-		ML::image::file_image::save(output, outpath.string(), 4);
+		//ML::image::file_image output = ML::image::to_byte_image(image_input, false);// TEST
+		ML::image::file_image::save(output, outpath.string(), image_input.C);
 	}
 	printf("done.\n");
 
