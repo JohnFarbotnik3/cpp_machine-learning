@@ -153,6 +153,10 @@ namespace ML::models {
 				float ie_sums[history_length];
 				for(int z=0;z<history_length;z++) ie_sums[z] = 0;
 
+				// NOTE: this multiplier prevents late-training spontaneous model degeneration.
+				// TODO: figure out why.
+				// TODO - IT DOESNT COMPLETELY SOLVE THE PROBLEM - IT ONLY REDUCES IT!
+				const float mult = 1.0f / itv_len;
 				for(int x=0;x<itv_len;x++) {
 					backprop_target& bt = bts[x];
 					foreward_target& ft = fts[x];
@@ -162,8 +166,8 @@ namespace ML::models {
 					for(int z=0;z<history_length;z++) {
 						float error_term = signal_error_terms[z][out_n];
 						float input_value = input_value_history[z][in_n];
-						ie_sums[z] += error_term * ft.weight;
-						we_sum     += error_term * input_value;
+						ie_sums[z] += error_term * mult * ft.weight;
+						we_sum     += error_term * mult * input_value;
 					}
 					// adjust target weight.
 					ft.weight = std::clamp(ft.weight + (we_sum * learning_rate), -WEIGHT_LIMIT, +WEIGHT_LIMIT);
@@ -261,14 +265,16 @@ namespace ML::models {
 			///*
 
 			// TODO - revert this back to normalizing against combined batch error (instead of per image error).
+			float in_sum = 0;
+			float out_sum = 0;
 			for(int z=0;z<history_length;z++) {
-				float in_sum = 0;
-				float out_sum = 0;
 				for(int x=0;x< input_error_history[z].size();x++)  in_sum += std::abs( input_error_history[z][x]);
 				for(int x=0;x<output_error_history[z].size();x++) out_sum += std::abs(output_error_history[z][x]);
-				float mult = (out_sum / in_sum) * (float(IMAGE_SIZE_I) / float(IMAGE_SIZE_O));
-				assert(out_sum > 0.0f);
-				assert(in_sum > 0.0f);
+			}
+			float mult = (out_sum / in_sum) * (float(IMAGE_SIZE_I) / float(IMAGE_SIZE_O));
+			assert(out_sum > 0.0f);
+			assert(in_sum > 0.0f);
+			for(int z=0;z<history_length;z++) {
 				for(int x=0;x< input_error_history[z].size();x++) input_error_history[z][x] *= mult;
 				//printf("error: z=%i, isum=%f, osum=%f\n", z, in_sum, out_sum);
 			}
@@ -426,8 +432,7 @@ namespace ML::models {
 
 			// mix and condense image.
 			// (w, h) -> (w/32, h/32)
-			push_layer_mix_AxA_to_1x1(idim, 1, false);// TEST
-			//push_layer_mix_AxA_to_1x1(idim, 3, false);
+			push_layer_mix_AxA_to_1x1(idim, 3, false);
 			//push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 4, true); idim = odim;
 
 			/*
@@ -450,7 +455,7 @@ namespace ML::models {
 			//*/
 
 			//push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 4, true); idim = odim;
-			//push_layer_mix_AxA_to_1x1(idim, 3, false);
+			push_layer_mix_AxA_to_1x1(idim, 3, false);
 
 			assert(odim.X == idim.X);
 			assert(odim.Y == idim.Y);

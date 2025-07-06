@@ -28,10 +28,10 @@ run:
 -tadjustlr_itv 50 \
 -tadjustlr_len 10 \
 -tcp 50 \
--pmp 0 \
+-pmp 1 \
 -pmp_debug 0 \
 -bsz 5 \
--lr 0.20 \
+-lr 0.01 \
 -seed 12345 \
 -n_threads 2
 
@@ -103,6 +103,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 			minibatch.push_back(pool[x]);
 			pool[x] = pool[pool.size()-1];
 			pool.pop_back();
+			if(pool.size() == 0) break;
 		}
 		image_minibatches.push_back(minibatch);
 	}
@@ -163,6 +164,8 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 			timepoint t1 = timepoint::now();
 			settings.stats.push_value("dt error", t1.delta_us(t0));
 			settings.stats.push_value("avg error", avg_error);
+			// TODO TEST
+			printf("image: z=%i, avg_error=%f, path=%s\n", z, avg_error, minibatch[z].path().c_str());
 		}
 
 		// backpropagate.
@@ -181,7 +184,7 @@ void update_learning_rate(ML::models::autoencoder& model, training_settings& set
 	training_settings best_settings = settings;
 	ML::models::autoencoder best_model = model;
 
-	vector<float> lr_mults { 1.0/2.0, 1.0/1.2, 1.0, 1.0*1.2, 1.0*2.0};
+	vector<float> lr_mults { 1.0/1.2, 1.0, 1.2 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		ML::models::autoencoder test_model = model;
@@ -301,8 +304,9 @@ int main(const int argc, const char** argv) {
 	sample_image_cache cache;
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
 	for(int z=0;z<n_training_cycles;z++) {
+		// print training info.
+		printf("training cycle: %i / %i\n", z, n_training_cycles);
 		// run training batch.
-		printf("training cycle: %i / %i.\n", z, n_training_cycles);
 		training_cycle(model, settings, cache);
 		// print stats.
 		if(z % training_print_itv == 0) {
@@ -319,6 +323,8 @@ int main(const int argc, const char** argv) {
 			printf("new learning rate: %f\n", settings.learning_rate);
 			z += tadjustlr_len;
 		}
+		// TODO TEST
+		//if(z > 300) print_model_parameters(model);
 	}
 	printf("done training.\n");
 	printf("==============================\n");

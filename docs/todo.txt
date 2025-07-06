@@ -63,14 +63,6 @@ in each partition point to other neurons in the same partition, with only a few 
 the that would allow decent multithreading.
 
 
-> debug autoencoder.
-- implement model saving and loading (plus a snapshot interval for intermediate model states).
-- check if lowering ReLU leakage speeds of the slow half of the learning process.
-	^ with lower leakage, try higher learning rate?
-- add config file parsing (newline delimited KEY=VALUE pairs).
-- re-add middle layers to fully prove autoencoder effectiveness.
-- bug: trying "-channels 3" causes buggy output.
-
 > optimize autoencoder.
 * figure out why backprop (specifically the weights part) isnt scaling well with number of threads.
 	n_threads=1: foreward=60ms, backprop=70ms
@@ -111,12 +103,21 @@ useful information about program hotspots.
 > misc
 - add a dense connection push-layer function (all inputs connected to all outputs).
 - autoencoder: experiment with lower bias values and lower ReLU leakage.
-- use different tiling in push-layer value-images based on whether or not values
-are being mixed.
 
 
 
-
-
+> debug autoencoder.
+- implement model saving and loading (plus a snapshot interval for intermediate model states).
+- check if lowering ReLU leakage speeds of the slow half of the learning process.
+	^ with lower leakage, try higher learning rate?
+- add config file parsing (newline delimited KEY=VALUE pairs).
+- re-add middle layers to fully prove autoencoder effectiveness.
+- figure out why model is performing well and then explodes without warning
+far into the training process (when error values are very small).
+* work on model ergonomics first:
+	config files: commandline parameters in text file.
+	custom loggers: each one with a different file it accumulates into.
+	model save/load: launch-config, current-settings, model-parameters, training-logs.
+...
 
 
