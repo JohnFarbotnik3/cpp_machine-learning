@@ -21,19 +21,17 @@ namespace ML::models {
 		NOTE: this network is intended to be populated externally.
 	*/
 	struct layer_network {
-		int MAX_HISTORY_LENGTH = 0;
+		// TODO - experiment with using signal_history to store error terms during backprop.
 		vector<float> biases;
 		vector<vector<float>> signal_history; // sequence of signal images.
 		foreward_target_list foreward_targets;
 		backprop_target_list backprop_targets;// inverse of this layer's foreward_targets.
 
-		layer_network(int IMAGE_SIZE, int MAX_HISTORY_LENGTH) {
+		layer_network(int IMAGE_SIZE) {
 			biases.resize(IMAGE_SIZE);
-			signal_history.resize(MAX_HISTORY_LENGTH);
-			for(int z=0;z<MAX_HISTORY_LENGTH;z++) signal_history[z].resize(IMAGE_SIZE);
 		}
 
-		int get_size() {
+		int image_size() {
 			return biases.size();
 		}
 
@@ -76,22 +74,25 @@ namespace ML::models {
 
 		static void propagate_func(layer_network& layer, const vector<float>& input_values, vector<float>& output_values, const int history_index, const int o_beg, int const o_end) {
 			// compute activations.
+			const int IMAGE_SIZE = layer.image_size();
+			vector<float>& signal_image = layer.signal_history[history_index];
 			for(int n=o_beg;n<o_end;n++) {
 				float sum = layer.biases[n];
 				const target_itv itv = layer.foreward_targets.get_interval(n);
 				for(int i=itv.beg;i<itv.end;i++) {
-					const foreward_target& target = layer.foreward_targets.targets[i];
-					sum += target.weight * input_values[target.neuron_index];
+					const foreward_target ft = layer.foreward_targets.targets[i];
+					sum += ft.weight * input_values[ft.neuron_index];
 				}
-				const int IMAGE_SIZE = layer.biases.size();
-				layer.signal_history[history_index][history_index * IMAGE_SIZE + n] = sum;
+				signal_image[n] = sum;
 				output_values[n] = activation_func(sum);
 			}
 		}
 
 		void propagate(const int n_threads, const int history_index, const std::vector<float>& input_values, std::vector<float>& output_values) {
-			// spawn threads.
 			const int IMAGE_SIZE = biases.size();
+			while(history_index >= signal_history.size()) signal_history.emplace_back(IMAGE_SIZE);
+
+			// spawn threads.
 			vector<int> intervals = generate_intervals(n_threads, IMAGE_SIZE);
 			vector<std::thread> threads;
 			for(int x=0;x<n_threads;x++) {
@@ -102,14 +103,14 @@ namespace ML::models {
 			for(int x=0;x<n_threads;x++) threads[x].join();
 		}
 
-		static void back_propagate_func_output_side(layer_network& layer, vector<vector<float>>& signal_error_terms, const vector<vector<float>>& output_error_history, const int history_length, const float learning_rate, const int o_beg, const int o_end) {
+		static void back_propagate_func_output_side(layer_network& layer, vector<vector<float>>& signal_error_terms_history, const vector<vector<float>>& output_error_history, const int history_length, const float learning_rate, const int o_beg, const int o_end) {
 			// compute signal error terms.
 			for(int z=0;z<history_length;z++) {
-				const vector<float>& out_error_history = output_error_history[z];
-				const vector<float>& out_signal_history = layer.signal_history[z];
-				vector<float>& out_error_terms = signal_error_terms[z];
+				const vector<float>& output_error = output_error_history[z];
+				const vector<float>& signal_history = layer.signal_history[z];
+				vector<float>& signal_error_terms = signal_error_terms_history[z];
 				for(int n=o_beg;n<o_end;n++) {
-					out_error_terms[n] = out_error_history[n] * activation_derivative(out_signal_history[n]);
+					signal_error_terms[n] = output_error[n] * activation_derivative(signal_history[n]);
 				}
 			}
 
@@ -118,7 +119,7 @@ namespace ML::models {
 			for(int n=o_beg;n<o_end;n++) {
 				float sum = 0;
 				for(int z=0;z<history_length;z++) {
-					sum += signal_error_terms[z][n];
+					sum += signal_error_terms_history[z][n];
 				}
 				layer.biases[n] = std::clamp(layer.biases[n] + (sum * learning_rate), -BIAS_LIMIT, +BIAS_LIMIT);
 			}
@@ -128,29 +129,44 @@ namespace ML::models {
 			// for each neuron (or value) in input...
 			const float WEIGHT_LIMIT = 100.0f;
 			for(int n=i_beg;n<i_end;n++) {
-				// adjust weights and gather input error sums.
-				vector<float> ie_sums(layer.MAX_HISTORY_LENGTH);// TODO - see if using array produces better performance.
-				for(int z=0;z<history_length;z++) ie_sums[z] = 0;
 				const target_itv itv = layer.backprop_targets.get_interval(n);
-				const float mult = 1.0f / (itv.end - itv.beg);
-				for(int x=itv.beg;x<itv.end;x++) {
-					backprop_target& bt = layer.backprop_targets.targets[x];
-					foreward_target& ft = layer.foreward_targets.targets[bt.target_index];
+				const int itv_len = itv.end - itv.beg;
+
+				// gather targets.
+				backprop_target bts[itv_len];
+				foreward_target fts[itv_len];
+				for(int x=0;x<itv_len;x++) {
+					backprop_target bt = layer.backprop_targets.targets[x+itv.beg];
+					foreward_target ft = layer.foreward_targets.targets[bt.target_index];
+					bts[x] = bt;
+					fts[x] = ft;
+				}
+
+				// gather input-error and weight-adjustment sums.
+				float ie_sums[history_length];
+				for(int z=0;z<history_length;z++) ie_sums[z] = 0;
+
+				const float mult = 1.0f / itv_len;
+				for(int x=0;x<itv_len;x++) {
+					backprop_target& bt = bts[x];
+					foreward_target& ft = fts[x];
 					const int out_n = bt.neuron_index;
-					float w_sum = 0;
+					float we_sum = 0;// weight-error sum.
 					for(int z=0;z<history_length;z++) {
 						float error_term = signal_error_terms[z][out_n];
 						float out_value = activation_func(layer.signal_history[z][out_n]);
 						ie_sums[z] += error_term * mult * ft.weight;
-						w_sum      += error_term * mult * out_value;
+						we_sum     += error_term * mult * out_value;
 					}
 					// adjust target weight.
-					ft.weight = std::clamp(ft.weight + (w_sum * learning_rate), -WEIGHT_LIMIT, +WEIGHT_LIMIT);
+					ft.weight = std::clamp(ft.weight + (we_sum * learning_rate), -WEIGHT_LIMIT, +WEIGHT_LIMIT);
 				}
+
+				// update target weights.
+				for(int x=0;x<itv_len;x++) layer.foreward_targets.targets[bts[x].target_index].weight = fts[x].weight;
+
 				// set input error.
-				for(int z=0;z<history_length;z++) {
-					input_error_history[z][n] = ie_sums[z];
-				}
+				for(int z=0;z<history_length;z++) input_error_history[z][n] = ie_sums[z];
 			}
 		}
 
@@ -170,6 +186,7 @@ namespace ML::models {
 			// assertions.
 			assert( input_error_history.size() >= history_length);
 			assert(output_error_history.size() >= history_length);
+			assert(      signal_history.size() >= history_length);
 			const int IMAGE_SIZE_I = input_error_history[0].size();
 			const int IMAGE_SIZE_O = biases.size();
 			assert(IMAGE_SIZE_I > 0);
@@ -232,18 +249,18 @@ namespace ML::models {
 
 			// normalize input-error against output-error to have same average gradient per-neuron.
 			///*
-			float in_sum = 0;
-			float out_sum = 0;
+
 			for(int z=0;z<history_length;z++) {
+				float in_sum = 0;
+				float out_sum = 0;
 				for(int x=0;x< input_error_history[z].size();x++)  in_sum += std::abs( input_error_history[z][x]);
 				for(int x=0;x<output_error_history[z].size();x++) out_sum += std::abs(output_error_history[z][x]);
-			}
-			float mult = (out_sum / in_sum) * (float(IMAGE_SIZE_I) / float(IMAGE_SIZE_O));
-			assert(out_sum > 0.0f);
-			assert(in_sum > 0.0f);
-			for(int z=0;z<history_length;z++) {
+				float mult = (out_sum / in_sum) * (float(IMAGE_SIZE_I) / float(IMAGE_SIZE_O));
+				assert(out_sum > 0.0f);
+				assert(in_sum > 0.0f);
 				for(int x=0;x< input_error_history[z].size();x++) input_error_history[z][x] *= mult;
 			}
+
 			timepoint t3 = timepoint::now();
 
 			// TEST - print time taken for each part of function.
@@ -288,12 +305,10 @@ namespace ML::models {
 			}
 		};
 
-		int MAX_HISTORY_LENGTH = 0;
 		image_dimensions input_dimensions;
 		vector<layer_network> layers;
 
-		autoencoder(image_dimensions input_dimensions, int MAX_HISTORY_LENGTH) {
-			this->MAX_HISTORY_LENGTH = MAX_HISTORY_LENGTH;
+		autoencoder(image_dimensions input_dimensions) {
 			this->input_dimensions = input_dimensions;
 			init_model_topology();
 		}
@@ -321,7 +336,7 @@ namespace ML::models {
 		void push_layer_mix_AxA_to_1x1(const image_dimensions dim, const int A, bool mix_channels) {
 			// create output layer and generate targets for each neuron (pixel-value) in output.
 			// NOTE: the order these target-lists are generated in must match order of neurons.
-			layer_network output_layer(dim.length(), MAX_HISTORY_LENGTH);
+			layer_network output_layer(dim.length());
 			layer_image_iterator output_iter = dim.get_iterator();
 			while(output_iter.has_next()) {
 				int x0 = std::max(output_iter.x - A/2, 0);
@@ -366,7 +381,7 @@ namespace ML::models {
 
 			// create output layer and generate targets for each neuron (pixel-value) in output.
 			// NOTE: the order these target-lists are generated in must match order of neurons.
-			layer_network output_layer(odim.length(), MAX_HISTORY_LENGTH);
+			layer_network output_layer(odim.length());
 			layer_image_iterator output_iter = odim.get_iterator();
 			while(output_iter.has_next()) {
 				int x0 = (output_iter.x / B) * A;
@@ -400,7 +415,7 @@ namespace ML::models {
 			// mix and condense image.
 			// (w, h) -> (w/32, h/32)
 			push_layer_mix_AxA_to_1x1(idim, 3, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 6, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 4, true); idim = odim;
 			/*
 			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
 			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 2, true); in_dim = out_dim;
@@ -447,26 +462,42 @@ namespace ML::models {
 		void propagate(const int n_threads, const int history_index, const std::vector<float>& input_values, std::vector<float>& output_values) {
 			// assertions.
 			const int n_layers = layers.size();
-			assert( input_values.size() == layers[0].get_size());
-			assert(output_values.size() == layers[n_layers-1].get_size());
+			assert( input_values.size() == layers[0].image_size());
+			assert(output_values.size() == layers[n_layers-1].image_size());
 
 			vector<float> value_buffer_i;
 			vector<float> value_buffer_o;
 
 			// first layer.
-			value_buffer_o.resize(layers[0].get_size());
+			value_buffer_o.resize(layers[0].image_size());
 			layers[0].propagate(n_threads, history_index, input_values, value_buffer_o);
 			std::swap(value_buffer_i, value_buffer_o);
 
 			// middle layers.
 			for(int L=1;L<layers.size();L++) {
-				value_buffer_o.resize(layers[L].get_size());
+				value_buffer_o.resize(layers[L].image_size());
 				layers[L].propagate(n_threads, history_index, value_buffer_i, value_buffer_o);
 				std::swap(value_buffer_i, value_buffer_o);
 			}
 
 			// copy output.
 			memcpy(output_values.data(), value_buffer_o.data(), output_values.size() * sizeof(float));
+		}
+
+		void generate_error_image(const vector<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared) {
+			assert(input.size() == output.size());
+			assert(error.size() == output.size());
+			if(loss_squared) {
+				for(int x=0;x<output.size();x++) {
+					const float delta = input[x] - output[x];
+					error[x] = delta * std::abs(delta);
+				}
+			} else {
+				for(int x=0;x<output.size();x++) {
+					const float delta = input[x] - output[x];
+					error[x] = delta;
+				}
+			}
 		}
 
 		void resize_2d(vector<vector<float>>& vec, int X, int Y) {
@@ -481,8 +512,8 @@ namespace ML::models {
 			assert(output_error_history.size() >= history_length);
 			const int n_layers = layers.size();
 			for(int z=0;z<history_length;z++) {
-				const int IMAGE_SIZE_I = layers[0].get_size();
-				const int IMAGE_SIZE_O = layers[n_layers-1].get_size();
+				const int IMAGE_SIZE_I = layers[0].image_size();
+				const int IMAGE_SIZE_O = layers[n_layers-1].image_size();
 				assert(IMAGE_SIZE_I == IMAGE_SIZE_O);
 				assert( input_error_history[z].size() == IMAGE_SIZE_I);
 				assert(output_error_history[z].size() == IMAGE_SIZE_O);
@@ -492,15 +523,15 @@ namespace ML::models {
 			vector<vector<float>> errhist_buffer_o;
 
 			// copy output.
-			resize_2d(errhist_buffer_o, history_length, layers[n_layers-1].get_size());
+			resize_2d(errhist_buffer_o, history_length, layers[n_layers-1].image_size());
 			for(int z=0;z<history_length;z++) {
-				const int IMAGE_SIZE = layers[n_layers-1].get_size();
+				const int IMAGE_SIZE = layers[n_layers-1].image_size();
 				memcpy(errhist_buffer_o[z].data(), output_error_history[z].data(), IMAGE_SIZE * sizeof(float));
 			}
 
 			// middle layers.
 			for(int L=n_layers-1;L>0;L--) {
-				resize_2d(errhist_buffer_i, history_length, layers[L-1].get_size());
+				resize_2d(errhist_buffer_i, history_length, layers[L-1].image_size());
 				layers[L].back_propagate(n_threads, history_length, errhist_buffer_i, errhist_buffer_o, learning_rate);
 				std::swap(errhist_buffer_i, errhist_buffer_o);
 			}

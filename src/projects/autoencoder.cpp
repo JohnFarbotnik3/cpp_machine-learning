@@ -8,6 +8,9 @@
 #include <string>
 
 /*
+debug build:
+g++ -std=c++23 -O2 -fsanitize=address -o "./src/projects/autoencoder.elf" "./src/projects/autoencoder.cpp"
+
 build:
 g++ -std=c++23 -O2 -o "./src/projects/autoencoder.elf" "./src/projects/autoencoder.cpp"
 g++ -std=c++23 -O2 -march=native -o "./src/projects/autoencoder.elf" "./src/projects/autoencoder.cpp"
@@ -20,10 +23,12 @@ run:
 -w 512 \
 -h 512 \
 -tc 50 \
+-tadjustlr_ini 1 \
 -tadjustlr_itv 50 \
 -tadjustlr_len 10 \
 -tcp 50 \
 -pmp 0 \
+-pmp_debug 0 \
 -bsz 5 \
 -lr 0.20 \
 -seed 12345 \
@@ -41,6 +46,7 @@ using std::vector;
 using timepoint = ML::stats::timepoint;
 namespace fs = std::filesystem;
 using model_t = ML::models::autoencoder;
+using model_image_t = ML::image::variable_image_tiled<float>;
 
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
@@ -81,57 +87,59 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings)
 	int TX = model.input_dimensions.TX;
 	int TY = model.input_dimensions.TY;
 	int TC = model.input_dimensions.TC;
-	ML::image::variable_image_tiled<float> image_input (X, Y, C, TX, TY, TC);
-	ML::image::variable_image_tiled<float> image_output(X, Y, C, TX, TY, TC);
-	ML::image::variable_image_tiled<float> image_error (X, Y, C, TX, TY, TC);
-	ML::image::variable_image_tiled<float> image_temp  (X, Y, C, TX, TY, TC);
+	vector<model_image_t> image_input;
+	vector<vector<float>> image_output;
+	vector<vector<float>> image_error;
+	vector<vector<float>> image_temp;
+	for(int z=0;z<settings.minibatch_size;z++) {
+		const int IMAGE_SIZE = X * Y * C;
+		image_input .emplace_back(X, Y, C, TX, TY, TC);
+		image_output.emplace_back(IMAGE_SIZE);
+		image_error .emplace_back(IMAGE_SIZE);
+		image_temp  .emplace_back(IMAGE_SIZE);
+	}
 	for(const auto& minibatch : image_minibatches) {
-		// run minibatch.
-		assert(minibatch.size() > 0);
 		timepoint tb0 = timepoint::now();
-		for(const auto& entry : minibatch) {
-			timepoint t0;
-			timepoint t1;
+		assert(minibatch.size() > 0);
 
-			// load image.
-			t0 = timepoint::now();
+		// load images and generate samples.
+		for(int z=0;z<minibatch.size();z++) {
+			timepoint t0 = timepoint::now();
+			const auto& entry = minibatch[z];
 			ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string());
-			t1 = timepoint::now();
+			timepoint t1 = timepoint::now();
+			ML::image::generate_sample_image(image_input[z], loaded_image);
+			timepoint t2 = timepoint::now();
 			settings.stats.push_value("dt load image", t1.delta_us(t0));
+			settings.stats.push_value("dt gen sample", t2.delta_us(t1));
+		}
 
-			// generate sample.
-			t0 = timepoint::now();
-			ML::image::generate_sample_image(image_input, loaded_image);
-			t1 = timepoint::now();
-			settings.stats.push_value("dt gen sample", t1.delta_us(t0));
-
-			// propagate.
-			t0 = timepoint::now();
-			model.propagate(settings.n_threads, image_input.data, image_output.data);
-			t1 = timepoint::now();
+		// propagate.
+		for(int z=0;z<minibatch.size();z++) {
+			timepoint t0 = timepoint::now();
+			model.propagate(settings.n_threads, z, image_input[z].data, image_output[z]);
+			timepoint t1 = timepoint::now();
 			settings.stats.push_value("dt propagate", t1.delta_us(t0));
+		}
 
-			// compute error.
-			t0 = timepoint::now();
-			ML::image::generate_error_image(image_input, image_output, image_error, true);
+		// compute error.
+		for(int z=0;z<minibatch.size();z++) {
+			timepoint t0 = timepoint::now();
+			model.generate_error_image(image_input[z].data, image_output[z], image_error[z], true);
 			float avg_error = 0;
-			for(int x=0;x<image_error.data.size();x++) avg_error += std::abs(image_error.data[x]);
-			avg_error /= image_error.data.size();
-			t1 = timepoint::now();
+			for(int x=0;x<image_error[z].size();x++) avg_error += std::abs(image_error[z][x]);
+			avg_error /= image_error[z].size();
+			timepoint t1 = timepoint::now();
 			settings.stats.push_value("dt error", t1.delta_us(t0));
 			settings.stats.push_value("avg error", avg_error);
-
-			// backpropagate.
-			t0 = timepoint::now();
-			model.back_propagate(settings.n_threads, image_error.data, image_temp.data, image_input.data);
-			t1 = timepoint::now();
-			settings.stats.push_value("dt backprop", t1.delta_us(t0));
 		}
-		// adjust model.
+
+		// backpropagate.
 		timepoint t0 = timepoint::now();
-		model.apply_batch_error(settings.learning_rate / minibatch.size());
+		model.back_propagate(settings.n_threads, minibatch.size(), image_temp, image_error, settings.learning_rate / minibatch.size());
 		timepoint t1 = timepoint::now();
-		settings.stats.push_value("dt apply error", t1.delta_us(t0));
+		settings.stats.push_value("dt backprop", t1.delta_us(t0));
+
 		timepoint tb1 = timepoint::now();
 		settings.stats.push_value("dt training batch", tb1.delta_us(tb0));
 	}
@@ -187,8 +195,8 @@ void print_model_parameters(ML::models::autoencoder& model) {
 		int len = snprintf(buf, 64, "layer %i", x);
 		string name = string(buf, len);
 		const auto& layer = model.layers[x];
-		biases.resize(layer.neurons.size());
-		for(int x=0;x<biases.size();x++) biases[x] = layer.neurons[x].bias;
+		biases.resize(layer.biases.size());
+		for(int x=0;x<biases.size();x++) biases[x] = layer.biases[x];
 		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, SUM_COLUMN_WIDTH, biases);
 	}
 
@@ -201,17 +209,6 @@ void print_model_parameters(ML::models::autoencoder& model) {
 		const auto& layer = model.layers[x];
 		weights.resize(layer.foreward_targets.targets.size());
 		for(int x=0;x<weights.size();x++) weights[x] = layer.foreward_targets.targets[x].weight;
-		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, SUM_COLUMN_WIDTH, weights);
-	}
-
-	printf("BACKPROP WEIGHTS (should match WEIGHTS)\n");
-	for(int x=0;x<model.layers.size();x++) {
-		char buf[64];
-		int len = snprintf(buf, 64, "layer %i", x);
-		string name = string(buf, len);
-		const auto& layer = model.layers[x];
-		weights.resize(layer.backprop_targets.targets.size());
-		for(int x=0;x<weights.size();x++) weights[x] = layer.backprop_targets.targets[x].weight;
 		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, SUM_COLUMN_WIDTH, weights);
 	}
 }
@@ -242,6 +239,8 @@ int main(const int argc, const char** argv) {
 	int n_training_cycles = arguments.get_named_value("-tc", 20);
 	int training_print_itv = arguments.get_named_value("-tcp", 1);
 	int pmp = arguments.get_named_value("-pmp", 1);
+	int pmp_debug = arguments.get_named_value("-pmp_debug", 0);
+	int tadjustlr_ini = arguments.get_named_value("-tadjustlr_ini", 1);
 	int tadjustlr_itv = arguments.get_named_value("-tadjustlr_itv", 50);
 	int tadjustlr_len = arguments.get_named_value("-tadjustlr_len", 10);
 	settings.minibatch_size = arguments.get_named_value("-bsz", 5);
@@ -275,11 +274,12 @@ int main(const int argc, const char** argv) {
 		if(z % training_print_itv == 0) {
 			printf("==============================\n");
 			print_training_stats(settings.stats);
+			if(pmp_debug) print_model_parameters(model);
 			settings.stats.clear_all();
 			printf("------------------------------\n");
 		}
 		// update learning rate.
-		if(z % tadjustlr_itv == 0 && z > 0) {
+		if(z % tadjustlr_itv == 0 && (z > 0 || tadjustlr_ini)) {
 			printf("updating learning rate:\n");
 			update_learning_rate(model, settings, tadjustlr_len);
 			printf("new learning rate: %f\n", settings.learning_rate);
@@ -309,7 +309,7 @@ int main(const int argc, const char** argv) {
 		ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string());
 		ML::image::generate_sample_image(image_input, loaded_image);
 		// propagate.
-		model.propagate(settings.n_threads, image_input.data, image_output.data);
+		model.propagate(settings.n_threads, 0, image_input.data, image_output.data);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output = ML::image::to_byte_image(image_output, false);

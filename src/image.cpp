@@ -81,13 +81,14 @@ namespace ML::image {
 		and then converted to floats during sampling.
 	*/
 	struct file_image {
+		const int CH_DEFAULT = 4;
+
 		string path = "";
 		vector<byte> data = vector<byte>(0);
 		int X = 0;
 		int Y = 0;
 		int C = 0;
 		int ch_orig = 0;
-		const int CH_DEFAULT = 4;
 
 		void print() const {
 			printf("<loaded_image>\n");
@@ -124,7 +125,7 @@ namespace ML::image {
 				vector<byte> imgdata_loaded(imgdata, imgdata+size);
 				image.data = flip_data_y(imgdata_loaded, image.X, image.Y, image.C);
 				image.path = filepath;
-				delete[] imgdata;
+				free(imgdata);
 			}
 			return image;
 		}
@@ -603,26 +604,7 @@ namespace ML::image {
 			sample_area_linear(sample, image);
 		}
 	};
-	void generate_error_image(const variable_image_tiled<float>& input, const variable_image_tiled<float>& output, variable_image_tiled<float>& error, bool loss_squared) {
-		variable_image_tile_iterator sample_iter = input.get_iterator(
-			input.x0, input.x1,
-			input.y0, input.y1,
-			0, input.C
-		);
 
-		// TODO - remove iterator, it doesnt seem to be needed.
-		if(loss_squared) while(sample_iter.has_next()) {
-			int i = sample_iter.i;
-			const float delta = input.data[i] - output.data[i];
-			error.data[i] = delta * std::abs(delta);
-			sample_iter.next();
-		} else while(sample_iter.has_next()) {
-			int i = sample_iter.i;
-			const float delta = input.data[i] - output.data[i];
-			error.data[i] = delta;
-			sample_iter.next();
-		}
-	}
 	file_image to_byte_image(variable_image_tiled<float>& sample, bool clamp_to_sample_area) {
 		file_image image;
 		image.X = sample.X;
