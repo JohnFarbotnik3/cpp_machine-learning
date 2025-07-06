@@ -64,24 +64,6 @@ namespace ML::target_list {
 
 	// list of targets used for foreward propagation.
 	struct foreward_target_list : target_list<foreward_target> {
-		// synchronize weights of backprop targets with foreward targets.
-		void store_weights(backprop_target_list& backprop_list) {
-			for(int x=0;x<backprop_list.targets.size();x++) {
-				backprop_target& bt = backprop_list.targets[x];
-				foreward_target& ft = this->targets[bt.target_index];
-				bt.weight = ft.weight;
-			}
-		}
-
-		// commit weights from backprop targets to foreward targets.
-		void load_weights(backprop_target_list& backprop_list) {
-			for(int x=0;x<backprop_list.targets.size();x++) {
-				backprop_target& bt = backprop_list.targets[x];
-				foreward_target& ft = this->targets[bt.target_index];
-				ft.weight = bt.weight;
-			}
-		}
-
 		backprop_target_list get_inverse(const int input_length) {
 			// get number of back-targets for each input neuron.
 			std::vector<int> lengths(input_length);

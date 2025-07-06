@@ -40,7 +40,7 @@ using std::string;
 using std::vector;
 using timepoint = ML::stats::timepoint;
 namespace fs = std::filesystem;
-
+using model_t = ML::models::autoencoder;
 
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
