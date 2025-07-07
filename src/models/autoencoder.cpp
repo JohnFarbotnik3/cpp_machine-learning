@@ -122,19 +122,22 @@ namespace ML::models {
 			}
 
 			// adjust biases.
-			const float BIAS_LIMIT = 5.0f;
+			const float BIAS_LIMIT = 10.0f;
+			const float BIAS_ADJUSTMENT_LIMIT = 0.5f;
 			for(int n=o_beg;n<o_end;n++) {
 				float sum = 0;
 				for(int z=0;z<history_length;z++) {
 					sum += signal_error_terms_history[z][n];
 				}
-				layer.biases[n] = std::clamp(layer.biases[n] + (sum * learning_rate), -BIAS_LIMIT, +BIAS_LIMIT);
+				const float adjustment = std::clamp(sum * learning_rate, -BIAS_ADJUSTMENT_LIMIT, +BIAS_ADJUSTMENT_LIMIT);
+				layer.biases[n] = std::clamp(layer.biases[n] + adjustment, -BIAS_LIMIT, +BIAS_LIMIT);
 			}
 		}
 
 		static void back_propagate_func_input_side(layer_network& layer, vector<vector<float>>& input_error_history, const vector<vector<float>>& input_value_history, const vector<vector<float>>& signal_error_terms, const int history_length, const float learning_rate, const int i_beg, const int i_end) {
 			// for each neuron (or value) in input...
 			const float WEIGHT_LIMIT = 100.0f;
+			const float WEIGHT_ADJUSTMENT_LIMIT = 0.5f;
 			for(int n=i_beg;n<i_end;n++) {
 				const target_itv itv = layer.backprop_targets.get_interval(n);
 				const int itv_len = itv.end - itv.beg;
@@ -152,11 +155,6 @@ namespace ML::models {
 				// gather input-error and weight-adjustment sums.
 				float ie_sums[history_length];
 				for(int z=0;z<history_length;z++) ie_sums[z] = 0;
-
-				// NOTE: this multiplier prevents late-training spontaneous model degeneration.
-				// TODO: figure out why.
-				// TODO - IT DOESNT COMPLETELY SOLVE THE PROBLEM - IT ONLY REDUCES IT!
-				const float mult = 1.0f / itv_len;
 				for(int x=0;x<itv_len;x++) {
 					backprop_target& bt = bts[x];
 					foreward_target& ft = fts[x];
@@ -164,13 +162,13 @@ namespace ML::models {
 					const int in_n = ft.neuron_index;
 					float we_sum = 0;// weight-error sum.
 					for(int z=0;z<history_length;z++) {
-						float error_term = signal_error_terms[z][out_n];
-						float input_value = input_value_history[z][in_n];
-						ie_sums[z] += error_term * mult * ft.weight;
-						we_sum     += error_term * mult * input_value;
+						const float error_term = signal_error_terms[z][out_n];
+						ie_sums[z] += error_term * ft.weight;
+						we_sum     += error_term * input_value_history[z][in_n];
 					}
 					// adjust target weight.
-					ft.weight = std::clamp(ft.weight + (we_sum * learning_rate), -WEIGHT_LIMIT, +WEIGHT_LIMIT);
+					const float adjustment = std::clamp(we_sum * learning_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
+					ft.weight = std::clamp(ft.weight + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
 				}
 
 				// update target weights.

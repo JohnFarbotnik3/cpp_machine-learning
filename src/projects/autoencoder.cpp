@@ -23,7 +23,7 @@ run:
 -o ./data/output/images_02 \
 -w 512 \
 -h 512 \
--tc 50 \
+-tc 500 \
 -tadjustlr_ini 1 \
 -tadjustlr_itv 50 \
 -tadjustlr_len 10 \
@@ -157,7 +157,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 		// compute error.
 		for(int z=0;z<minibatch.size();z++) {
 			timepoint t0 = timepoint::now();
-			model.generate_error_image(image_input_img[z], image_output[z], image_error[z], false);
+			model.generate_error_image(image_input_img[z], image_output[z], image_error[z], true);
 			float avg_error = 0;
 			for(int x=0;x<image_error[z].size();x++) avg_error += std::abs(image_error[z][x]);
 			avg_error /= image_error[z].size();
@@ -180,15 +180,18 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 }
 
 void update_learning_rate(ML::models::autoencoder& model, training_settings& settings, int cycles, sample_image_cache& cache) {
+	const float LEARNING_RATE_LIMIT = 0.99f;
 	float best_pct_error;
 	training_settings best_settings = settings;
 	ML::models::autoencoder best_model = model;
 
-	vector<float> lr_mults { 1.0/1.2, 1.0, 1.2 };
+	vector<float> lr_mults = settings.learning_rate >= LEARNING_RATE_LIMIT
+		? vector<float>{ 1.0/1.2, 1.0 }
+		: vector<float>{ 1.0/1.2, 1.0, 1.2 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		ML::models::autoencoder test_model = model;
-		test_settings.learning_rate = settings.learning_rate * lr_mults[z];
+		test_settings.learning_rate = std::min(settings.learning_rate * lr_mults[z], LEARNING_RATE_LIMIT);
 		printf("trying rate = %f\n", test_settings.learning_rate); for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings, cache);
 		const vector<int> percentiles { 20 };
 		float pct_error = ML::stats::get_percentile_values(percentiles, test_settings.stats.groups.at("avg error"))[0];
@@ -264,12 +267,13 @@ int main(const int argc, const char** argv) {
 		}
 	}
 	training_settings settings;
+	// TODO - move all of these loose parameters to settings as well.
 	string model_dir  = arguments.named_arguments.at("-m");
 	string input_dir  = arguments.named_arguments.at("-i");
 	string output_dir = arguments.named_arguments.at("-o");
 	int input_w = arguments.get_named_value("-w", 512);
 	int input_h = arguments.get_named_value("-h", 512);
-	int input_c = arguments.get_named_value("-channels", 4);
+	int input_c = arguments.get_named_value("-channels", 3);
 	int n_training_cycles = arguments.get_named_value("-tc", 20);
 	int training_print_itv = arguments.get_named_value("-tcp", 1);
 	int pmp = arguments.get_named_value("-pmp", 1);

@@ -114,29 +114,61 @@ proportional to error of that particular neuron, then backprops that error.
 ^ this may be useful if the error function doesnt have direction information.
 - graph backprop can have a queue of neurons to update during
 next backprop iteration, with their respective local losses.
-
-
+- fix console stuttering by buffering a few lines and then committing them at times
+that would result in good looking / well aligned prints.
+* idea: graph model can have both fixed architecture links and flexible links.
+both would be processed during foreward & backward propagation; however this would
+make implementation more complex (but faster and more memory efficient).
+^^ note: switching back to scanlines would make coordinates and indices
+far easier to work with.
+- pick better commandline parameter names.
+** storing value-history and signal-history might not be worth it,
+as it limits the maximum batch size to 5-10. a good idea
+for improving backprop performance might be to keep adjustments
+seperate from the other values rather than interleaving them like I did before
+with the layer_neuron struct.
 
 
 > debug autoencoder.
-- implement model saving and loading (plus a snapshot interval for intermediate model states).
-- check if lowering ReLU leakage speeds of the slow half of the learning process.
+- check if lowering ReLU leakage speeds up the slow half of the learning process.
 	^ with lower leakage, try higher learning rate?
 - add config file parsing (newline delimited KEY=VALUE pairs).
 - re-add middle layers to fully prove autoencoder effectiveness.
 - figure out why model is performing well and then explodes without warning
 far into the training process (when error values are very small).
 * work on model ergonomics first:
-	config files: commandline parameters in text file.
-	custom loggers: each one with a different file it accumulates into.
-	model save/load: launch-config, current-settings, model-parameters, training-logs.
+	- config files: commandline parameters in text file.
+	- model save/load: launch-config, current-settings, model-parameters, training-logs.
+	- interactive console: log training stuff, but also allow typing commands,
+		such as changing settings, play/pause, and save/load.
+	- custom loggers: each one with a different file it accumulates into.
+		every message should have format: { timestamp, log_level, text }.
+		(will involve lots of snprintf, or writing variadic functions of my own.
+		if writing my own, try javascript style names like "console.log(...)".)
 * fix seemingly dead/unresponsive pixels at end of long training runs.
 	for some reason the last few pixels just dont seem to train.
 ^ (adaptive) annealing may help with this, i.e. annealing the model periodically
 	with an annealing-rate that adjusts the same way learning-rate does.
+	backpropagated-annealing may fix this much more quickly than naive annealing,
+	but that would involve duplicating the backprop code which would be annoying.
+	(unless I clean up and simplify the code enough.)
+- experiment with reducing loss power (continuously), starting from L^2.0 at high error
+and tending towards L^1.0 as error reaches 0. when combined with capped adaptive learning
+rate this should get model to actually finish training the "dead pixels" (I hope).
 ...
 
 
+
+
+> write journal post:
+- why forewardprop-targets (as opposed to fixed architecture).
+- why backprop-targets (to allow multithreading - "read style" vs "write style").
+- adaptive learning rate implementation.
+- why ReLU with leakage.
+- backprop error gradient normalization (a potential issue with concentrating error gradient).
+- why tiled images (show pictures with scanline vs tiled memory layouts).
+- current issues (model degeneration - suspected to be caused by an interaction between loss_squared
+and error gradient concentration).
 
 
 
