@@ -1,5 +1,6 @@
 #include "../utils/commandline.cpp"
 #include "../utils/random.cpp"
+#include "../utils/vector_util.cpp"
 #include "../image.cpp"
 #include "../stats.cpp"
 #include "../models/autoencoder.cpp"
@@ -147,7 +148,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 			// generate sample.
 			t0 = timepoint::now();
 			image_input_img = cache.get_sample(path, image_input_img, loaded_image);
-			memcpy(image_input.data(), image_input_img.data.data(), image_input.size() * sizeof(float));
+			utils::vector_util::vec_copy(image_input, image_input_img.data, 0, image_input.size());
 			t1 = timepoint::now();
 			settings.stats.push_value("dt gen sample", t1.delta_us(t0));
 
@@ -160,11 +161,9 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 			// compute error.
 			t0 = timepoint::now();
 			model.generate_error_image(image_input_img, image_output, image_error, true);
-			float avg_error = 0;
-			for(int x=0;x<image_error.size();x++) avg_error += std::abs(image_error[x]);
-			avg_error /= image_error.size();
+			const float avg_error = utils::vector_util::vec_sum_abs_mt(image_error, 0, image_error.size(), settings.n_threads) / image_error.size();
 			t1 = timepoint::now();
-			settings.stats.push_value("dt error", t1.delta_us(t0));
+			settings.stats.push_value("dt error image", t1.delta_us(t0));
 			settings.stats.push_value("avg error", avg_error);
 			// TODO TEST
 			printf("image: z=%i, avg_error=%f, path=%s\n", z, avg_error, minibatch[z].path().c_str());

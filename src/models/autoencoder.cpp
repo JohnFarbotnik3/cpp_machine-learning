@@ -56,6 +56,7 @@ namespace ML::models {
 
 		void sync_targets_list() {
 			backprop_targets = foreward_targets.get_inverse(INPUT_IMAGE_SIZE);
+			foreward_targets.save_weights(backprop_targets);
 			weights_error.resize(foreward_targets.targets.size());
 		}
 
@@ -110,7 +111,7 @@ namespace ML::models {
 				layer.output[n] = activation_func(sum);
 			}
 			// copy output values.
-			memcpy(output_values.data() + o_beg, layer.output.data() + o_beg, (o_end - o_beg) * sizeof(float));
+			vec_copy(output_values, layer.output, o_beg, o_end);
 		}
 
 		void propagate(const int n_threads, const std::vector<float>& input_values, std::vector<float>& output_values) {
@@ -171,9 +172,9 @@ namespace ML::models {
 			assert(output_error.size() == IMAGE_SIZE_O);
 
 			using timepoint = ML::stats::timepoint;
-			timepoint t0 = timepoint::now();
 
 			// compute signal error terms and adjust biases of output neurons.
+			//timepoint t0 = timepoint::now();
 			vector<float> signal_error_terms(IMAGE_SIZE_O);
 			{
 				vector<int> intervals = generate_intervals(n_threads, IMAGE_SIZE_O);
@@ -190,9 +191,9 @@ namespace ML::models {
 				}
 				for(int x=0;x<n_threads;x++) threads[x].join();
 			}
-			timepoint t1 = timepoint::now();
 
 			// back propagate error to input and adjust weights.
+			//timepoint t1 = timepoint::now();
 			{
 				vector<int> intervals = generate_intervals(n_threads, IMAGE_SIZE_I);
 				vector<std::thread> threads;
@@ -209,23 +210,20 @@ namespace ML::models {
 				}
 				for(int x=0;x<n_threads;x++) threads[x].join();
 			}
-			timepoint t2 = timepoint::now();
 
 			// normalize input-error against output-error to have same average gradient per-neuron.
 			///*
-			float in_sum = 0;
-			float out_sum = 0;
-			for(int x=0;x< input_error.size();x++)  in_sum += std::abs( input_error[x]);
-			for(int x=0;x<output_error.size();x++) out_sum += std::abs(output_error[x]);
+			//timepoint t2 = timepoint::now();
+			const float in_sum  = vec_sum_abs_mt(input_error, 0, input_error.size(), n_threads);
+			const float out_sum = vec_sum_abs_mt(output_error, 0, output_error.size(), n_threads);
 			float mult = (out_sum / in_sum) * (float(IMAGE_SIZE_I) / float(IMAGE_SIZE_O));
 			assert(out_sum > 0.0f);
 			assert(in_sum > 0.0f);
-			vec_mult(input_error, mult);
+			vec_mult_mt(input_error, mult, 0, input_error.size(), n_threads);
 			//printf("error: z=%i, isum=%f, osum=%f\n", z, in_sum, out_sum);
 
-			timepoint t3 = timepoint::now();
-
 			// TEST - print time taken for each part of function.
+			//timepoint t3 = timepoint::now();
 			//printf("dt:\t%li\t%li\t%li\n", t1.delta_us(t0), t2.delta_us(t1), t3.delta_us(t2));
 		}
 
@@ -540,12 +538,10 @@ namespace ML::models {
 			layers[0].back_propagate(n_threads, input_error, input_value, error_buffer_o);
 		}
 
-		// TODO - call this in training loop.
 		void clear_batch_error() {
 			for(int z=0;z<layers.size();z++) layers[z].clear_batch_error();
 		}
 
-		// TODO - call this in training loop.
 		void apply_batch_error(const float learning_rate, const int batch_size) {
 			for(int z=0;z<layers.size();z++) layers[z].apply_batch_error(learning_rate, batch_size);
 		}
