@@ -1,6 +1,5 @@
 
 #include <cassert>
-#include <cstring>
 #include <thread>
 #include <vector>
 #include <algorithm>
@@ -237,7 +236,26 @@ namespace ML::models {
 			vec_fill(weights_error, 0.0f);
 		}
 
-		void apply_batch_error(const float learning_rate, const int batch_size) {
+		static void apply_batch_error_biases(layer_network& layer, const int beg, const int end, const float adjustment_rate) {
+			const float BIAS_LIMIT = 10.0f;
+			const float BIAS_ADJUSTMENT_LIMIT = 0.5f;
+			for(int n=beg;n<end;n++) {
+				const float adjustment = std::clamp(layer.biases_error[n] * adjustment_rate, -BIAS_ADJUSTMENT_LIMIT, +BIAS_ADJUSTMENT_LIMIT);
+				layer.biases[n] = std::clamp(layer.biases[n] + adjustment, -BIAS_LIMIT, +BIAS_LIMIT);
+			}
+		}
+		static void apply_batch_error_weights(layer_network& layer, const int beg, const int end, const float adjustment_rate) {
+			const float WEIGHT_LIMIT = 100.0f;
+			const float WEIGHT_ADJUSTMENT_LIMIT = 0.5f;
+			for(int x=beg;x<end;x++) {
+				backprop_target& bt = layer.backprop_targets.targets[x];
+				foreward_target& ft = layer.foreward_targets.targets[bt.target_index];
+				const float adjustment = std::clamp(layer.weights_error[x] * adjustment_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
+				bt.weight = std::clamp(bt.weight + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
+				ft.weight = bt.weight;
+			}
+		}
+		void apply_batch_error(const float learning_rate, const int batch_size, const int n_threads) {
 			// assertions.
 			assert(biases_error.size() == biases.size());
 			assert(weights_error.size() == foreward_targets.targets.size());
@@ -246,22 +264,27 @@ namespace ML::models {
 			const float adjustment_rate = learning_rate / batch_size;
 
 			// adjust biases.
-			const float BIAS_LIMIT = 10.0f;
-			const float BIAS_ADJUSTMENT_LIMIT = 0.5f;
-			for(int n=0;n<biases_error.size();n++) {
-				const float adjustment = std::clamp(biases_error[n] * adjustment_rate, -BIAS_ADJUSTMENT_LIMIT, +BIAS_ADJUSTMENT_LIMIT);
-				biases[n] = std::clamp(biases[n] + adjustment, -BIAS_LIMIT, +BIAS_LIMIT);
+			{
+				vector<std::thread> threads;
+				const int len = biases.size();
+				for(int x=0;x<n_threads;x++) {
+					const int x0 = ((x+0) * len) / n_threads;
+					const int x1 = ((x+1) * len) / n_threads;
+					threads.push_back(std::thread(apply_batch_error_biases, std::ref(*this), x0, x1, adjustment_rate));
+				}
+				for(int x=0;x<n_threads;x++) threads[x].join();
 			}
 
 			// adjust weights.
-			const float WEIGHT_LIMIT = 100.0f;
-			const float WEIGHT_ADJUSTMENT_LIMIT = 0.5f;
-			for(int x=0;x<weights_error.size();x++) {
-				backprop_target& bt = backprop_targets.targets[x];
-				foreward_target& ft = foreward_targets.targets[bt.target_index];
-				const float adjustment = std::clamp(weights_error[x] * adjustment_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
-				bt.weight = std::clamp(bt.weight + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
-				ft.weight = bt.weight;
+			{
+				vector<std::thread> threads;
+				const int len = backprop_targets.targets.size();
+				for(int x=0;x<n_threads;x++) {
+					const int x0 = ((x+0) * len) / n_threads;
+					const int x1 = ((x+1) * len) / n_threads;
+					threads.push_back(std::thread(apply_batch_error_weights, std::ref(*this), x0, x1, adjustment_rate));
+				}
+				for(int x=0;x<n_threads;x++) threads[x].join();
 			}
 		}
 	};
@@ -542,8 +565,8 @@ namespace ML::models {
 			for(int z=0;z<layers.size();z++) layers[z].clear_batch_error();
 		}
 
-		void apply_batch_error(const float learning_rate, const int batch_size) {
-			for(int z=0;z<layers.size();z++) layers[z].apply_batch_error(learning_rate, batch_size);
+		void apply_batch_error(const float learning_rate, const int batch_size, const int n_threads) {
+			for(int z=0;z<layers.size();z++) layers[z].apply_batch_error(learning_rate, batch_size, n_threads);
 		}
 	};
 }

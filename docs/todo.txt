@@ -127,6 +127,8 @@ as it limits the maximum batch size to 5-10. a good idea
 for improving backprop performance might be to keep adjustments
 seperate from the other values rather than interleaving them like I did before
 with the layer_neuron struct.
+- write more convenient thread spawning functions (variadic) so that I dont have to repeat the
+same threads-over-intervals code over and over again.
 
 
 > debug autoencoder.

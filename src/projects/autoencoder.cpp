@@ -5,7 +5,6 @@
 #include "../stats.cpp"
 #include "../models/autoencoder.cpp"
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <string>
 
@@ -177,7 +176,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 
 		// apply accumulated error.
 		t0 = timepoint::now();
-		model.apply_batch_error(settings.learning_rate, minibatch.size());
+		model.apply_batch_error(settings.learning_rate, minibatch.size(), settings.n_threads);
 		t1 = timepoint::now();
 		settings.stats.push_value("dt apply err", t1.delta_us(t0));
 
