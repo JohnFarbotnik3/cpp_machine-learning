@@ -14,6 +14,7 @@ namespace ML::target_list {
 	struct backprop_target {
 		int neuron_index	= 0;	// index of output neuron.
 		int target_index	= 0;	// index of related foreward_target.
+		float weight		= 0;	// copy of weight from foreward_target.
 	};
 
 	// interval of targets in a target list.
@@ -100,6 +101,22 @@ namespace ML::target_list {
 			list.offsets[input_length] = list.targets.size();
 
 			return list;
+		}
+
+		void save_weights(backprop_target_list& list) {
+			for(int x=0;x<targets.size();x++) {
+				backprop_target& bt = list.targets[x];
+				foreward_target& ft = targets[bt.target_index];
+				bt.weight = ft.weight;
+			}
+		}
+
+		void load_weights(backprop_target_list& list) {
+			for(int x=0;x<targets.size();x++) {
+				backprop_target& bt = list.targets[x];
+				foreward_target& ft = targets[bt.target_index];
+				ft.weight = bt.weight;
+			}
 		}
 	};
 

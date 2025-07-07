@@ -115,64 +115,72 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 	int TX = model.input_dimensions.TX;
 	int TY = model.input_dimensions.TY;
 	int TC = model.input_dimensions.TC;
-	vector<model_image_t> image_input_img;
-	vector<vector<float>> image_input;
-	vector<vector<float>> image_output;
-	vector<vector<float>> image_error;
-	vector<vector<float>> image_temp;
-	for(int z=0;z<settings.minibatch_size;z++) {
-		image_input_img.emplace_back(X, Y, C, TX, TY, TC);
-		const int IMAGE_SIZE = image_input_img[z].data.size();
-		image_input .emplace_back(IMAGE_SIZE);
-		image_output.emplace_back(IMAGE_SIZE);
-		image_error .emplace_back(IMAGE_SIZE);
-		image_temp  .emplace_back(IMAGE_SIZE);
-	}
+	model_image_t image_input_img(X, Y, C, TX, TY, TC);
+	const int IMAGE_SIZE = image_input_img.data.size();
+	vector<float> image_input (IMAGE_SIZE);
+	vector<float> image_output(IMAGE_SIZE);
+	vector<float> image_error (IMAGE_SIZE);
+	vector<float> image_temp  (IMAGE_SIZE);
 	for(const auto& minibatch : image_minibatches) {
 		timepoint tb0 = timepoint::now();
 		assert(minibatch.size() > 0);
 
-		// load images and generate samples.
+		timepoint t0;
+		timepoint t1;
+
+		// clear accumulated error.
+		t0 = timepoint::now();
+		model.clear_batch_error();
+		t1 = timepoint::now();
+		settings.stats.push_value("dt clear err", t1.delta_us(t0));
+
 		for(int z=0;z<minibatch.size();z++) {
+
+			// load image.
 			const auto& entry = minibatch[z];
 			const string path = entry.path().string();
-			timepoint t0 = timepoint::now();
+			t0 = timepoint::now();
 			ML::image::file_image loaded_image = cache.get_file(path, C);
-			timepoint t1 = timepoint::now();
-			image_input_img[z] = cache.get_sample(path, image_input_img[z], loaded_image);
-			memcpy(image_input[z].data(), image_input_img[z].data.data(), image_input[z].size() * sizeof(float));
-			timepoint t2 = timepoint::now();
+			t1 = timepoint::now();
 			settings.stats.push_value("dt load image", t1.delta_us(t0));
-			settings.stats.push_value("dt gen sample", t2.delta_us(t1));
-		}
 
-		// propagate.
-		for(int z=0;z<minibatch.size();z++) {
-			timepoint t0 = timepoint::now();
-			model.propagate(settings.n_threads, z, image_input[z], image_output[z]);
-			timepoint t1 = timepoint::now();
+			// generate sample.
+			t0 = timepoint::now();
+			image_input_img = cache.get_sample(path, image_input_img, loaded_image);
+			memcpy(image_input.data(), image_input_img.data.data(), image_input.size() * sizeof(float));
+			t1 = timepoint::now();
+			settings.stats.push_value("dt gen sample", t1.delta_us(t0));
+
+			// propagate.
+			t0 = timepoint::now();
+			model.propagate(settings.n_threads, image_input, image_output);
+			t1 = timepoint::now();
 			settings.stats.push_value("dt propagate", t1.delta_us(t0));
-		}
 
-		// compute error.
-		for(int z=0;z<minibatch.size();z++) {
-			timepoint t0 = timepoint::now();
-			model.generate_error_image(image_input_img[z], image_output[z], image_error[z], true);
+			// compute error.
+			t0 = timepoint::now();
+			model.generate_error_image(image_input_img, image_output, image_error, true);
 			float avg_error = 0;
-			for(int x=0;x<image_error[z].size();x++) avg_error += std::abs(image_error[z][x]);
-			avg_error /= image_error[z].size();
-			timepoint t1 = timepoint::now();
+			for(int x=0;x<image_error.size();x++) avg_error += std::abs(image_error[x]);
+			avg_error /= image_error.size();
+			t1 = timepoint::now();
 			settings.stats.push_value("dt error", t1.delta_us(t0));
 			settings.stats.push_value("avg error", avg_error);
 			// TODO TEST
 			printf("image: z=%i, avg_error=%f, path=%s\n", z, avg_error, minibatch[z].path().c_str());
+
+			// backpropagate.
+			t0 = timepoint::now();
+			model.back_propagate(settings.n_threads, image_temp, image_input, image_error);
+			t1 = timepoint::now();
+			settings.stats.push_value("dt backprop", t1.delta_us(t0));
 		}
 
-		// backpropagate.
-		timepoint t0 = timepoint::now();
-		model.back_propagate(settings.n_threads, minibatch.size(), image_temp, image_input, image_error, settings.learning_rate / minibatch.size());
-		timepoint t1 = timepoint::now();
-		settings.stats.push_value("dt backprop", t1.delta_us(t0));
+		// apply accumulated error.
+		t0 = timepoint::now();
+		model.apply_batch_error(settings.learning_rate, minibatch.size());
+		t1 = timepoint::now();
+		settings.stats.push_value("dt apply err", t1.delta_us(t0));
 
 		timepoint tb1 = timepoint::now();
 		settings.stats.push_value("dt training batch", tb1.delta_us(tb0));
@@ -353,7 +361,7 @@ int main(const int argc, const char** argv) {
 		ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string(), C);
 		ML::image::generate_sample_image(image_input, loaded_image);
 		// propagate.
-		model.propagate(settings.n_threads, 0, image_input.data, image_output.data);
+		model.propagate(settings.n_threads, image_input.data, image_output.data);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output = ML::image::to_byte_image(image_output, false);
