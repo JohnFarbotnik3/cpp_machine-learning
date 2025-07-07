@@ -511,6 +511,10 @@ namespace ML::models {
 			memcpy(output_values.data(), value_buffer_i.data(), output_values.size() * sizeof(float));
 		}
 
+		/*
+			WARNING: loss_squared can lead to error-concentration which causes models to explode
+			when training is going well and they are very close to 0 average error.
+		*/
 		void generate_error_image(const variable_image_tiled<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared) {
 			// assertions.
 			const int IMAGE_SIZE = input.X * input.Y * input.C;

@@ -97,12 +97,24 @@ useful information about program hotspots.
 	(each layer would have values keeping track of which iterator and iterator-parameters to use.)
 	^ multi-threaded backprop may still benefit from target indices since inverse mapping
 	could be complicated, particularly around edges of image.
+- use memcpy instead of using "=" to set vector data,
+as it may improve performance by reducing allocations.
+^ WARNING: memcpy is risky since its really easy to make typos (such as forgetting to multiply by sizeof).
+	write a vec_memcpy function which for copying ranges in vectors, which calls memcpy and DOESNT have typos.
+- some parts of backprop are not yet multithreaded (ex: error normalization).
+- there is room to introduce SIMD.
 ...
 
 
 > misc
 - add a dense connection push-layer function (all inputs connected to all outputs).
 - autoencoder: experiment with lower bias values and lower ReLU leakage.
+- add stochastic-back-anneal function which simply anneals with temperature
+proportional to error of that particular neuron, then backprops that error.
+^ this may be useful if the error function doesnt have direction information.
+- graph backprop can have a queue of neurons to update during
+next backprop iteration, with their respective local losses.
+
 
 
 
@@ -118,6 +130,17 @@ far into the training process (when error values are very small).
 	config files: commandline parameters in text file.
 	custom loggers: each one with a different file it accumulates into.
 	model save/load: launch-config, current-settings, model-parameters, training-logs.
+* fix seemingly dead/unresponsive pixels at end of long training runs.
+	for some reason the last few pixels just dont seem to train.
+^ (adaptive) annealing may help with this, i.e. annealing the model periodically
+	with an annealing-rate that adjusts the same way learning-rate does.
 ...
+
+
+
+
+
+
+
 
 

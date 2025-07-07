@@ -157,7 +157,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 		// compute error.
 		for(int z=0;z<minibatch.size();z++) {
 			timepoint t0 = timepoint::now();
-			model.generate_error_image(image_input_img[z], image_output[z], image_error[z], true);
+			model.generate_error_image(image_input_img[z], image_output[z], image_error[z], false);
 			float avg_error = 0;
 			for(int x=0;x<image_error[z].size();x++) avg_error += std::abs(image_error[z][x]);
 			avg_error /= image_error[z].size();
