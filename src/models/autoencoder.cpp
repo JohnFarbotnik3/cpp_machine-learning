@@ -255,16 +255,15 @@ namespace ML::models {
 				ft.weight = bt.weight;
 			}
 		}
-		void apply_batch_error(const float learning_rate, const int batch_size, const int n_threads) {
+		void apply_batch_error(const int n_threads, const int batch_size, const float learning_rate_b, const float learning_rate_w) {
 			// assertions.
 			assert(biases_error.size() == biases.size());
 			assert(weights_error.size() == foreward_targets.targets.size());
 			assert(weights_error.size() == backprop_targets.targets.size());
 
-			const float adjustment_rate = learning_rate / batch_size;
-
 			// adjust biases.
 			{
+				const float adjustment_rate = learning_rate_b / batch_size;
 				vector<std::thread> threads;
 				const int len = biases.size();
 				for(int x=0;x<n_threads;x++) {
@@ -277,6 +276,7 @@ namespace ML::models {
 
 			// adjust weights.
 			{
+				const float adjustment_rate = learning_rate_w / batch_size;
 				vector<std::thread> threads;
 				const int len = backprop_targets.targets.size();
 				for(int x=0;x<n_threads;x++) {
@@ -424,32 +424,27 @@ namespace ML::models {
 			// input.
 			image_dimensions idim = input_dimensions;
 			image_dimensions odim = idim;
+			const int ch = idim.C;
 
 			// mix and condense image.
-			// (w, h) -> (w/32, h/32)
+			// (w, h) -> (w/8, h/8)
 			push_layer_mix_AxA_to_1x1(idim, 3, false);
-			//push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 4, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 6, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 5, false);
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 8, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 7, false);
+			push_layer_scale_AxA_to_BxB(idim, odim, 8, 4, 12, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 9, false);
+			push_layer_scale_AxA_to_BxB(idim, odim, 8, 4, 16, true); idim = odim;
 
-			/*
-			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 2, true); in_dim = out_dim;
-			push_layer_mix_AxA_to_1x1(in_dim, 7, true);
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 8, 4, true); in_dim = out_dim;
-			push_layer_mix_AxA_to_1x1(in_dim, 9, true);
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 16, 8, true); in_dim = out_dim;
-			//*/
-
-			// expand back to original image.
-			/*
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 8, 16, true); in_dim = out_dim;
-			push_layer_mix_AxA_to_1x1(in_dim, 9, true);
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 4, 8, true); in_dim = out_dim;
-			push_layer_mix_AxA_to_1x1(in_dim, 7, true);
-			push_layer_scale_AxA_to_BxB(in_dim, out_dim, 2, 4, true); in_dim = out_dim;
-			push_layer_mix_AxA_to_1x1(in_dim, 3, false);
-			//*/
-
-			//push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 4, true); idim = odim;
+			// expand image back to original size.
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 8, 12, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 9, false);
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 8, 8, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 7, false);
+			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 6, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 5, false);
+			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, ch, true); idim = odim;
 			push_layer_mix_AxA_to_1x1(idim, 3, false);
 
 			assert(odim.X == idim.X);
@@ -565,8 +560,8 @@ namespace ML::models {
 			for(int z=0;z<layers.size();z++) layers[z].clear_batch_error();
 		}
 
-		void apply_batch_error(const float learning_rate, const int batch_size, const int n_threads) {
-			for(int z=0;z<layers.size();z++) layers[z].apply_batch_error(learning_rate, batch_size, n_threads);
+		void apply_batch_error(const int n_threads, const int batch_size, const float learning_rate_b, const float learning_rate_w) {
+			for(int z=0;z<layers.size();z++) layers[z].apply_batch_error(n_threads, batch_size, learning_rate_b, learning_rate_w);
 		}
 	};
 }

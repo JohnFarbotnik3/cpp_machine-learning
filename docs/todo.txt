@@ -154,10 +154,37 @@ far into the training process (when error values are very small).
 	backpropagated-annealing may fix this much more quickly than naive annealing,
 	but that would involve duplicating the backprop code which would be annoying.
 	(unless I clean up and simplify the code enough.)
-- experiment with reducing loss power (continuously), starting from L^2.0 at high error
+** experiment with reducing loss power (continuously), starting from L^2.0 at high error
 and tending towards L^1.0 as error reaches 0. when combined with capped adaptive learning
 rate this should get model to actually finish training the "dead pixels" (I hope).
+** add simple annealing, and an interval over which to compare training
+	of model variants with different annealing seeds & strengths (ex. LR*0, LR*0.5, LR*1.0, LR*2.0).
+** try smaller bias distribution (reduced stdev),
+	and add commandline arguments for model-parameter distributions.
+** clamp output image values when generating image files / previews.
 ...
+
+
+> TROUBLESHOOT MODEL WITH FOLLOWING SETTINGS (IT IMMEDIATELY EXPLODES!?)
+./src/projects/autoencoder.elf \
+-m ./data/models \
+-i ./data/images/images_1 \
+-o ./data/output/images_1 \
+-w 384 \
+-h 384 \
+-n_training_cycles 2000 \
+-tadjustlr_ini 1 \
+-tadjustlr_itv 50 \
+-tadjustlr_len 10 \
+-print_interval_stats 50 \
+-print_model_params 1 \
+-print_model_params_debug 1 \
+-bsz 5 \
+-lr 0.00001 \
+-lr_mult_b 0.5 \
+-lr_mult_w 1.0 \
+-seed 12345 \
+-n_threads 2
 
 
 
@@ -169,8 +196,10 @@ rate this should get model to actually finish training the "dead pixels" (I hope
 - why ReLU with leakage.
 - backprop error gradient normalization (a potential issue with concentrating error gradient).
 - why tiled images (show pictures with scanline vs tiled memory layouts).
-- current issues (model degeneration - suspected to be caused by an interaction between loss_squared
-and error gradient concentration).
+- current issues
+	- model degeneration - suspected to be caused by an interaction between loss_squared and error gradient concentration.
+	- "dead pixels" - it seems that they were caused by underflow and overflow, which was fixed by clamping output preview images.
+...
 
 
 

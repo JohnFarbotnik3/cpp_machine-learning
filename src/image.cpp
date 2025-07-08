@@ -410,24 +410,24 @@ namespace ML::image {
 	}
 	void sample_area_linear(variable_image_tiled<float>& sample, const file_image& image) {
 		// compute float conversions between sample coordinates to image coordinates.
-		vector<int> floor_mx(sample.X+1);
-		vector<int> floor_my(sample.Y+1);
-		vector<int> ceil__mx(sample.X+1);
-		vector<int> ceil__my(sample.Y+1);
-		vector<float> image_to_sample_x(image.X+1);
-		vector<float> image_to_sample_y(image.Y+1);
-		int max_int = std::max(image.X+1, image.Y+1);
+		vector<int> floor_mx(sample.X+2);
+		vector<int> floor_my(sample.Y+2);
+		vector<int> ceil__mx(sample.X+2);
+		vector<int> ceil__my(sample.Y+2);
+		vector<float> image_to_sample_x(image.X+2);
+		vector<float> image_to_sample_y(image.Y+2);
+		int max_int = std::max(image.X+2, image.Y+2);
 		vector<float> int_to_float(max_int);
 		{
 			float mx = float(image.X) / float(sample.x1 - sample.x0);
 			float my = float(image.Y) / float(sample.y1 - sample.y0);
-			for(int p=0;p<=sample.X;p++) floor_mx[p] = std::floor(float(p) * mx);
-			for(int p=0;p<=sample.Y;p++) floor_my[p] = std::floor(float(p) * my);
-			for(int p=0;p<=sample.X;p++) ceil__mx[p] = std::ceil(float(p) * mx);
-			for(int p=0;p<=sample.Y;p++) ceil__my[p] = std::ceil(float(p) * my);
-			for(int p=0;p<=image.X;p++) image_to_sample_x[p] = float(p) / mx;
-			for(int p=0;p<=image.Y;p++) image_to_sample_y[p] = float(p) / my;
-			for(int x=0;x<max_int;x++) int_to_float[x] = float(x);
+			for(int p=0;p<floor_mx.size();p++) floor_mx[p] = std::floor(float(p) * mx);
+			for(int p=0;p<floor_my.size();p++) floor_my[p] = std::floor(float(p) * my);
+			for(int p=0;p<ceil__mx.size();p++) ceil__mx[p] = std::ceil(float(p) * mx);
+			for(int p=0;p<ceil__my.size();p++) ceil__my[p] = std::ceil(float(p) * my);
+			for(int p=0;p<image_to_sample_x.size();p++) image_to_sample_x[p] = float(p) / mx;
+			for(int p=0;p<image_to_sample_y.size();p++) image_to_sample_y[p] = float(p) / my;
+			for(int p=0;p<int_to_float.size();p++) int_to_float[p] = float(p);
 		}
 
 		variable_image_tile_iterator sample_iter = sample.get_iterator(
@@ -455,12 +455,14 @@ namespace ML::image {
 				const float lx0 = std::max(image_to_sample_x[ix  ], int_to_float[sx  ]);
 				const float lx1 = std::min(image_to_sample_x[ix+1], int_to_float[sx+1]);
 				intersect_lengths_x[x] = lx1 - lx0;
+				assert(intersect_lengths_x[x] >= 0.0f);
 			}
 			for(int y=0;y<iylen;y++) {
 				const int iy = y + iy0;
 				const float ly0 = std::max(image_to_sample_y[iy  ], int_to_float[sy  ]);
 				const float ly1 = std::min(image_to_sample_y[iy+1], int_to_float[sy+1]);
 				intersect_lengths_y[y] = ly1 - ly0;
+				assert(intersect_lengths_y[y] >= 0.0f);
 			}
 
 			// gather weighted sum of image-pixel values according to
@@ -475,6 +477,10 @@ namespace ML::image {
 				const float area = intersect_lengths_x[x] * intersect_lengths_y[y];
 				value_sum += image.data[image.get_offset(ix, iy, sample_iter.c)] * area * m;
 			}}
+			if(value_sum <   0.0f) printf("value_sum <   0.0f: x=%i, y=%i, c=%i, i=%i, v=%f\n", sx, sy, sample_iter.c, sample_iter.i, value_sum);
+			if(value_sum > 255.0f) printf("value_sum < 255.0f: x=%i, y=%i, c=%i, i=%i, v=%f\n", sx, sy, sample_iter.c, sample_iter.i, value_sum);
+			assert(value_sum >= 0.0f);
+			assert(value_sum <= 255.0f);
 			sample.data[sample_iter.i] = value_sum;
 			sample_iter.next();
 		}
@@ -555,7 +561,14 @@ namespace ML::image {
 		const float m = 255.0f / 1.0f;
 		while(sample_iter.has_next()) {
 			int ofs = image.get_offset(sample_iter.x, sample_iter.y, sample_iter.c);
-			image.data[ofs] = sample.data[sample_iter.i] * m;
+			/*
+			NOTE: clamping output values fixed the apparent "dead pixels" problem.
+			- it was likely pixel value underflow/overflow that I was seeing,
+			which would explain why error rate was low even with very wrong pixels in output files.
+			- however using unclamped conversion can reveal bugs in sampling algorithm.
+			*/
+			//image.data[ofs] = sample.data[sample_iter.i] * m;// TODO TEST
+			image.data[ofs] = std::clamp(sample.data[sample_iter.i], 0.0f, 1.0f) * m;
 			sample_iter.next();
 		}
 		return image;

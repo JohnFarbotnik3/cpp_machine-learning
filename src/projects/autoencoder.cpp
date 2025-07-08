@@ -23,15 +23,17 @@ run:
 -o ./data/output/images_02 \
 -w 512 \
 -h 512 \
--tc 500 \
+-n_training_cycles 500 \
 -tadjustlr_ini 1 \
 -tadjustlr_itv 50 \
 -tadjustlr_len 10 \
--tcp 50 \
--pmp 1 \
--pmp_debug 0 \
+-print_interval_stats 50 \
+-print_model_params 1 \
+-print_model_params_debug 0 \
 -bsz 5 \
 -lr 0.01 \
+-lr_mult_b 0.1 \
+-lr_mult_w 1.0 \
 -seed 12345 \
 -n_threads 2
 
@@ -52,7 +54,10 @@ using model_image_t = ML::image::variable_image_tiled<float>;
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
 	ML::stats::training_stats stats;
+	vector<float> batch_error_trend;
 	float learning_rate;
+	float learning_rate_mult_b;
+	float learning_rate_mult_w;
 	int n_threads;
 	int minibatch_size;
 	int seed;
@@ -121,6 +126,8 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 	vector<float> image_output(IMAGE_SIZE);
 	vector<float> image_error (IMAGE_SIZE);
 	vector<float> image_temp  (IMAGE_SIZE);
+	float batch_error = 0.0f;
+	float batch_count = 0.0f;
 	for(const auto& minibatch : image_minibatches) {
 		timepoint tb0 = timepoint::now();
 		assert(minibatch.size() > 0);
@@ -161,6 +168,8 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 			t0 = timepoint::now();
 			model.generate_error_image(image_input_img, image_output, image_error, true);
 			const float avg_error = utils::vector_util::vec_sum_abs_mt(image_error, 0, image_error.size(), settings.n_threads) / image_error.size();
+			batch_error += avg_error;
+			batch_count += 1.0f;
 			t1 = timepoint::now();
 			settings.stats.push_value("dt error image", t1.delta_us(t0));
 			settings.stats.push_value("avg error", avg_error);
@@ -176,24 +185,27 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 
 		// apply accumulated error.
 		t0 = timepoint::now();
-		model.apply_batch_error(settings.learning_rate, minibatch.size(), settings.n_threads);
+		const float lr_b = settings.learning_rate * settings.learning_rate_mult_b;
+		const float lr_w = settings.learning_rate * settings.learning_rate_mult_w;
+		model.apply_batch_error(settings.n_threads, minibatch.size(), lr_b, lr_w);
 		t1 = timepoint::now();
 		settings.stats.push_value("dt apply err", t1.delta_us(t0));
 
 		timepoint tb1 = timepoint::now();
 		settings.stats.push_value("dt training batch", tb1.delta_us(tb0));
 	}
+	settings.batch_error_trend.push_back(batch_error / batch_count);
 }
 
 void update_learning_rate(ML::models::autoencoder& model, training_settings& settings, int cycles, sample_image_cache& cache) {
-	const float LEARNING_RATE_LIMIT = 0.99f;
+	const float LEARNING_RATE_LIMIT = 0.5f;
 	float best_pct_error;
 	training_settings best_settings = settings;
 	ML::models::autoencoder best_model = model;
 
 	vector<float> lr_mults = settings.learning_rate >= LEARNING_RATE_LIMIT
-		? vector<float>{ 1.0/1.2, 1.0 }
-		: vector<float>{ 1.0/1.2, 1.0, 1.2 };
+		? vector<float>{ 1.0/1.1, 1.0 }
+		: vector<float>{ 1.0/1.1, 1.0, 1.1 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		ML::models::autoencoder test_model = model;
@@ -280,15 +292,17 @@ int main(const int argc, const char** argv) {
 	int input_w = arguments.get_named_value("-w", 512);
 	int input_h = arguments.get_named_value("-h", 512);
 	int input_c = arguments.get_named_value("-channels", 3);
-	int n_training_cycles = arguments.get_named_value("-tc", 20);
-	int training_print_itv = arguments.get_named_value("-tcp", 1);
-	int pmp = arguments.get_named_value("-pmp", 1);
-	int pmp_debug = arguments.get_named_value("-pmp_debug", 0);
+	int n_training_cycles = arguments.get_named_value("-n_training_cycles", 50);
+	int print_interval_stats = arguments.get_named_value("-print_interval_stats", 1);
+	int print_model_params = arguments.get_named_value("-print_model_params", 1);
+	int print_model_params_debug = arguments.get_named_value("-print_model_params_debug", 0);
 	int tadjustlr_ini = arguments.get_named_value("-tadjustlr_ini", 1);
 	int tadjustlr_itv = arguments.get_named_value("-tadjustlr_itv", 50);
 	int tadjustlr_len = arguments.get_named_value("-tadjustlr_len", 10);
 	settings.minibatch_size = arguments.get_named_value("-bsz", 5);
 	settings.learning_rate = arguments.get_named_value("-lr", 0.001f);
+	settings.learning_rate_mult_b = arguments.get_named_value("-lr_mult_b", 1.0f);
+	settings.learning_rate_mult_w = arguments.get_named_value("-lr_mult_w", 1.0f);
 	settings.seed = arguments.get_named_value("-seed", 12345);
 	settings.n_threads = arguments.get_named_value("-n_threads", 1);
 
@@ -300,7 +314,7 @@ int main(const int argc, const char** argv) {
 	model.init_model_parameters(settings.seed, 0.0f, 0.3f, 0.0f, 0.2f);
 	//model.init_model_parameters(settings.seed, 0.0f, 0.0f, 1.0f, 0.5f);// TEST
 	printf("==============================\n");
-	if(pmp) print_model_parameters(model);
+	if(print_model_params) print_model_parameters(model);
 	printf("------------------------------\n");
 
 	// get list of images in input directory.
@@ -314,15 +328,14 @@ int main(const int argc, const char** argv) {
 	sample_image_cache cache;
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
 	for(int z=0;z<n_training_cycles;z++) {
-		// print training info.
-		printf("training cycle: %i / %i\n", z, n_training_cycles);
 		// run training batch.
 		training_cycle(model, settings, cache);
+		printf("training cycle: %i/%i | error: %f\n", z+1, n_training_cycles, settings.batch_error_trend.back());
 		// print stats.
-		if(z % training_print_itv == 0) {
+		if(z % print_interval_stats == 0) {
 			printf("==============================\n");
 			print_training_stats(settings.stats);
-			if(pmp_debug) print_model_parameters(model);
+			if(print_model_params_debug) print_model_parameters(model);
 			settings.stats.clear_all();
 			printf("------------------------------\n");
 		}
@@ -339,7 +352,7 @@ int main(const int argc, const char** argv) {
 	printf("done training.\n");
 	printf("==============================\n");
 	print_training_stats(settings.stats);
-	if(pmp) print_model_parameters(model);
+	if(print_model_params) print_model_parameters(model);
 	settings.stats.clear_all();
 	printf("------------------------------\n");
 	//*/
@@ -362,8 +375,12 @@ int main(const int argc, const char** argv) {
 		model.propagate(settings.n_threads, image_input.data, image_output.data);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
-		ML::image::file_image output = ML::image::to_byte_image(image_output, false);
-		//ML::image::file_image output = ML::image::to_byte_image(image_input, false);// TEST
+		ML::image::file_image output;
+		if(n_training_cycles == -1) {
+			output = ML::image::to_byte_image(image_input, false);// TEST
+		} else {
+			output = ML::image::to_byte_image(image_output, false);
+		}
 		ML::image::file_image::save(output, outpath.string(), image_input.C);
 	}
 	printf("done.\n");
