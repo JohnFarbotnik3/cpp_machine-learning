@@ -433,14 +433,14 @@ namespace ML::models {
 			push_layer_mix_AxA_to_1x1(idim, 5, false);
 			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 8, true); idim = odim;
 			push_layer_mix_AxA_to_1x1(idim, 7, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 8, 4, 12, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 12, true); idim = odim;
 			push_layer_mix_AxA_to_1x1(idim, 9, false);
 			push_layer_scale_AxA_to_BxB(idim, odim, 8, 4, 16, true); idim = odim;
 
 			// expand image back to original size.
 			push_layer_scale_AxA_to_BxB(idim, odim, 4, 8, 12, true); idim = odim;
 			push_layer_mix_AxA_to_1x1(idim, 9, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 4, 8, 8, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 8, true); idim = odim;
 			push_layer_mix_AxA_to_1x1(idim, 7, false);
 			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 6, true); idim = odim;
 			push_layer_mix_AxA_to_1x1(idim, 5, false);
@@ -498,7 +498,7 @@ namespace ML::models {
 			WARNING: loss_squared can lead to error-concentration which causes models to explode
 			when training is going well and they are very close to 0 average error.
 		*/
-		void generate_error_image(const variable_image_tiled<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared) {
+		void generate_error_image(const variable_image_tiled<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared, bool clamp_error) {
 			// assertions.
 			const int IMAGE_SIZE = input.X * input.Y * input.C;
 			assert(input.data.size() == IMAGE_SIZE);
@@ -528,6 +528,10 @@ namespace ML::models {
 					error[i] = delta;
 					sample_iter.next();
 				}
+			}
+
+			if(clamp_error) {
+				for(int x=0;x<error.size();x++) error[x] = std::clamp(error[x], -1.0f, 1.0f);
 			}
 		}
 

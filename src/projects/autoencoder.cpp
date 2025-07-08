@@ -166,7 +166,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 
 			// compute error.
 			t0 = timepoint::now();
-			model.generate_error_image(image_input_img, image_output, image_error, true);
+			model.generate_error_image(image_input_img, image_output, image_error, true, true);
 			const float avg_error = utils::vector_util::vec_sum_abs_mt(image_error, 0, image_error.size(), settings.n_threads) / image_error.size();
 			batch_error += avg_error;
 			batch_count += 1.0f;
@@ -204,8 +204,8 @@ void update_learning_rate(ML::models::autoencoder& model, training_settings& set
 	ML::models::autoencoder best_model = model;
 
 	vector<float> lr_mults = settings.learning_rate >= LEARNING_RATE_LIMIT
-		? vector<float>{ 1.0/1.1, 1.0 }
-		: vector<float>{ 1.0/1.1, 1.0, 1.1 };
+		? vector<float>{ 1.0/1.2, 1.0 }
+		: vector<float>{ 1.0/1.2, 1.0, 1.2 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		ML::models::autoencoder test_model = model;
@@ -327,10 +327,17 @@ int main(const int argc, const char** argv) {
 	printf("starting training.\n");
 	sample_image_cache cache;
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
+	vector<float>& error_trend = settings.batch_error_trend;
 	for(int z=0;z<n_training_cycles;z++) {
 		// run training batch.
+		if(z % (n_training_cycles/100) == 0) fprintf(stderr, "TRAINING: z=%i/%i\n", z+1, n_training_cycles);
 		training_cycle(model, settings, cache);
-		printf("training cycle: %i/%i | error: %f\n", z+1, n_training_cycles, settings.batch_error_trend.back());
+		printf("training cycle: %i/%i | error: %f\n", z+1, n_training_cycles, error_trend.back());
+		const float err_curr = error_trend.back();
+		const float err_prev = error_trend[error_trend.size()-5];
+		if(error_trend.size() >= 5 && err_curr > err_prev) {
+			fprintf(stderr, "ERROR RATE INCREASED: z=%i/%i, err_prev=%f, err_curr=%f\n", z+1, n_training_cycles, err_prev, err_curr);
+		}
 		// print stats.
 		if(z % print_interval_stats == 0) {
 			printf("==============================\n");
