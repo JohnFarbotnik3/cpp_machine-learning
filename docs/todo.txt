@@ -103,7 +103,7 @@ as it may improve performance by reducing allocations.
 	write a vec_memcpy function which for copying ranges in vectors, which calls memcpy and DOESNT have typos.
 - some parts of backprop are not yet multithreaded (ex: error normalization).
 - there is room to introduce SIMD.
-...
+
 
 
 > misc
@@ -129,6 +129,25 @@ seperate from the other values rather than interleaving them like I did before
 with the layer_neuron struct.
 - write more convenient thread spawning functions (variadic) so that I dont have to repeat the
 same threads-over-intervals code over and over again.
+
+
+
+> create X_O1 variant of autoencoder with fixed layer type.
+	* autoencoder doesnt need flexible targeting scheme.
+	* instead of having "autoencoder.cpp" in "./projects", have "./projects/autoencoder_o1" and "./.../main.cpp"
+	* put current autoencoder project in "./projects/autoencoder",
+		including the relevant image typedefs and loading functions;
+		but dont actually move the variable_image and variable_image_tiled structs
+		out of "image.cpp", as they may still see general use.
+	- revert images back to being scanline-based (create non-tiled variant of image).
+	- iterate over x,y coordinates.
+	- store weights and weight-errors in layer itself.
+	- store layer type, dimensions, etc. for proper iteration when reading from input
+	during propagation and when reading to input during backprop.
+	- propagate and backprop function variants will be needed for each layer type.
+	- implement custom "foreward_target_list" type which stores offsets, weights, and weight-errors.
+	^ when applying batch error, it is sufficient to just iterate through whole target list.
+...
 
 
 > debug autoencoder.
@@ -162,30 +181,8 @@ rate this should get model to actually finish training the "dead pixels" (I hope
 ** try smaller bias distribution (reduced stdev),
 	and add commandline arguments for model-parameter distributions.
 ** clamp output image values when generating image files / previews.
+x long run with 30 images crashed at z=~1000/2000, see logs.
 ...
-
-
-> TROUBLESHOOT MODEL WITH FOLLOWING SETTINGS (IT IMMEDIATELY EXPLODES!?)
-./src/projects/autoencoder.elf \
--m ./data/models \
--i ./data/images/images_1 \
--o ./data/output/images_1 \
--w 384 \
--h 384 \
--n_training_cycles 2000 \
--tadjustlr_ini 1 \
--tadjustlr_itv 50 \
--tadjustlr_len 10 \
--print_interval_stats 50 \
--print_model_params 1 \
--print_model_params_debug 1 \
--bsz 5 \
--lr 0.00001 \
--lr_mult_b 0.5 \
--lr_mult_w 1.0 \
--seed 12345 \
--n_threads 2
-
 
 
 
@@ -199,6 +196,7 @@ rate this should get model to actually finish training the "dead pixels" (I hope
 - current issues
 	- model degeneration - suspected to be caused by an interaction between loss_squared and error gradient concentration.
 	- "dead pixels" - it seems that they were caused by underflow and overflow, which was fixed by clamping output preview images.
+	- switching to fixed layers.
 ...
 
 

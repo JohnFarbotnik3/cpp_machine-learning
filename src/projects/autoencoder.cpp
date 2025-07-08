@@ -330,9 +330,9 @@ int main(const int argc, const char** argv) {
 	vector<float>& error_trend = settings.batch_error_trend;
 	for(int z=0;z<n_training_cycles;z++) {
 		// run training batch.
-		if(z % (n_training_cycles/100) == 0) fprintf(stderr, "TRAINING: z=%i/%i\n", z+1, n_training_cycles);
 		training_cycle(model, settings, cache);
 		printf("training cycle: %i/%i | error: %f\n", z+1, n_training_cycles, error_trend.back());
+		if(z % (n_training_cycles/100) == 0) fprintf(stderr, "TRAINING: z=%i/%i, lr=%f, er=%f\n", z+1, n_training_cycles, settings.learning_rate, error_trend.back());
 		const float err_curr = error_trend.back();
 		const float err_prev = error_trend[error_trend.size()-5];
 		if(error_trend.size() >= 5 && err_curr > err_prev) {
