@@ -2,6 +2,7 @@
 #include "../utils/random.cpp"
 #include "../utils/vector_util.cpp"
 #include "../image.cpp"
+#include "../image_file.cpp"
 #include "../stats.cpp"
 #include "../models/autoencoder.cpp"
 #include <cstdio>
@@ -49,7 +50,7 @@ using std::vector;
 using timepoint = ML::stats::timepoint;
 namespace fs = std::filesystem;
 using model_t = ML::models::autoencoder;
-using model_image_t = ML::image::variable_image_tiled<float>;
+using model_image_t = ML::image::value_image_tiled<float>;
 
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
@@ -81,7 +82,7 @@ struct sample_image_cache {
 	}
 	ML::image::file_image& get_file(const string path, int channels) {
 		if(files.contains(path)) return files.at(path);
-		files.insert_or_assign(path, file_image_t::load(path, channels));
+		files.insert_or_assign(path, ML::image::load_file_image(path, channels));
 		return files.at(path);
 	}
 
@@ -372,11 +373,11 @@ int main(const int argc, const char** argv) {
 	int TX = model.input_dimensions.TX;
 	int TY = model.input_dimensions.TY;
 	int TC = model.input_dimensions.TC;
-	ML::image::variable_image_tiled<float> image_input (X, Y, C, TX, TY, TC);
-	ML::image::variable_image_tiled<float> image_output(X, Y, C, TX, TY, TC);
+	ML::image::value_image_tiled<float> image_input (X, Y, C, TX, TY, TC);
+	ML::image::value_image_tiled<float> image_output(X, Y, C, TX, TY, TC);
 	for(const fs::directory_entry entry : settings.image_entries) {
 		// load image.
-		ML::image::file_image loaded_image = ML::image::file_image::load(entry.path().string(), C);
+		ML::image::file_image loaded_image = ML::image::load_file_image(entry.path().string(), C);
 		ML::image::generate_sample_image(image_input, loaded_image);
 		// propagate.
 		model.propagate(settings.n_threads, image_input.data, image_output.data);
@@ -384,11 +385,11 @@ int main(const int argc, const char** argv) {
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output;
 		if(n_training_cycles == -1) {
-			output = ML::image::to_byte_image(image_input, false);// TEST
+			output = ML::image::to_file_image(image_input, false);// TEST
 		} else {
-			output = ML::image::to_byte_image(image_output, false);
+			output = ML::image::to_file_image(image_output, false);
 		}
-		ML::image::file_image::save(output, outpath.string(), image_input.C);
+		ML::image::save_file_image(output, outpath.string(), image_input.C);
 	}
 	printf("done.\n");
 

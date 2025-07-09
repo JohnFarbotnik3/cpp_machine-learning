@@ -3,17 +3,10 @@
 #define F_image
 
 #include <algorithm>
-#include <cstddef>
-#include <cstring>
-#include <filesystem>
-#include <string>
+#include <cassert>
 #include <vector>
-#include "./utils/file_io.cpp"
-
-#define STB_IMAGE_IMPLEMENTATION
-#include "./stb-master/stb_image.h"
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "./stb-master/stb_image_write.h"
+#include "./image_file.cpp"
+#include "./image_value.cpp"
 
 /*
 	NOTE: this namespace assumes that image-data is in row-major form
@@ -21,178 +14,8 @@
 */
 namespace ML::image {
 	using std::vector;
-	using std::string;
-	namespace fs = std::filesystem;
-	using byte = unsigned char;
 
-	template<class T>
-	struct vec2 {
-		T x,y;
-
-		static vec2 linear_combination(vec2<T> a, T a_mult, vec2<T> b, T b_mult) {
-			T x = (a.x * a_mult) + (b.x * b_mult);
-			T y = (a.y * a_mult) + (b.y * b_mult);
-			return vec2<T>{ x,y };
-		}
-	};
-
-	/*
-		image containing RGBA byte data loaded from image files.
-		these are typically all loaded before training.
-
-		due to memory constraints, these are stored as bytes
-		and then converted to floats during sampling.
-	*/
-	struct file_image {
-		string path = "";
-		vector<byte> data = vector<byte>(0);
-		int X = 0;
-		int Y = 0;
-		int C = 0;
-		int C_orig = 0;
-
-		void print() const {
-			printf("<loaded_image>\n");
-			printf("path   : %s\n", path.c_str());
-			printf("area   : %i x %i (%i -> %i channels)\n", X, Y, C_orig, C);
-			printf("memsize: %.3f MiB\n", float(data.size()*sizeof(byte))/(1024*1024));
-		}
-
-		int get_offset(int x, int y, int c) const {
-			return (y*X + x) * C + c;
-		}
-
-		// flip image data in the y-axis.
-		static vector<byte> flip_data_y(const vector<byte>& imgdata, const int imgw, const int imgh, const int imgch) {
-			vector<byte> temp(imgdata.size());
-			int row_length = imgw * imgch;
-			for(int y=0;y<imgh;y++) {
-				int i_fl = row_length * y;
-				int i_in = row_length * (imgh-1-y);
-				memcpy(temp.data() + i_fl, imgdata.data() + i_in, row_length * sizeof(byte));
-			}
-			return temp;
-		}
-
-		static file_image load(string filepath, int channels) {
-			file_image image;
-			image.C = channels;
-			byte* imgdata = stbi_load(filepath.c_str(), &image.X, &image.Y, &image.C_orig, image.C);
-			if(imgdata == NULL) {
-				image.X=0;
-				image.Y=0;
-			} else {
-				int size = image.X * image.Y * image.C;
-				vector<byte> imgdata_loaded(imgdata, imgdata+size);
-				image.data = flip_data_y(imgdata_loaded, image.X, image.Y, image.C);
-				image.path = filepath;
-				free(imgdata);
-			}
-			return image;
-		}
-
-		static bool save(const file_image& image, string filepath, const int num_channels) {
-			printf("save(): X=%i, Y=%i, C=%i, ch=%i, size=%lu, path=%s\n", image.X, image.Y, image.C, num_channels, image.data.size(), filepath.c_str());
-			// create parent directories as needed.
-			std::error_code ec;
-			fs::path parent_dir = fs::path(filepath).parent_path();
-			fs::create_directories(parent_dir, ec);
-			if(ec) printf("error: %s\n", ec.message().c_str());
-			// write file.
-			bool allowed = utils::file_io::can_write_file(filepath);
-			if(!allowed) return false;
-			vector<byte> out_data = flip_data_y(image.data, image.X, image.Y, image.C);
-			int row_length = image.X * image.C;
-			int success = stbi_write_png(filepath.c_str(), image.X, image.Y, num_channels, out_data.data(), row_length * sizeof(byte));
-			if(success == 0) {
-				printf("failed to save image: %s\n", filepath.c_str());
-				printf("errno: %s\n", strerror(errno));
-			}
-			return success != 0;
-		}
-	};
-
-	vector<fs::directory_entry> get_image_entries_in_directory(string dir) {
-		vector<string> extensions = { ".png", ".jpg", ".jpeg" };
-		vector<fs::directory_entry> entries;
-		fs::directory_iterator iter(dir);
-		for(const fs::directory_entry entry : iter) {
-			bool match = false;
-			string f_path = entry.path().string();
-			string f_ext  = entry.path().extension().string();
-			for(const string& ext : extensions) if(ext.compare(f_ext) == 0) match=true;
-			if(match) entries.push_back(entry);
-		}
-		return entries;
-	}
-
-	/*
-		a simple iterator for iterating on an image
-		with a variable number of channels.
-
-		NOTE: image is assumed to be in row-major form
-		with interleaved colour channels.
-	*/
-	struct variable_image_iterator {
-		// image dimensions.
-		int X,Y,C;
-		// current position.
-		int x,y,c;
-		// image bounds - area to iterate through.
-		int x0,x1;
-		int y0,y1;
-		int c0,c1;
-		// index in image data.
-		int i;
-		// iterator steps remaining.
-		int irem;
-
-		variable_image_iterator() = default;
-		variable_image_iterator(
-			int X, int Y, int C,
-			int x0, int x1,
-			int y0, int y1,
-			int c0, int c1
-		) {
-			this->X = X;
-			this->Y = Y;
-			this->C = C;
-			this->x0 = x0;
-			this->x1 = x1;
-			this->y0 = y0;
-			this->y1 = y1;
-			this->c0 = c0;
-			this->c1 = c1;
-			this->x = x0;
-			this->y = y0;
-			this->c = c0;
-			this->i = ((y * X) + x) * C + c;
-			this->irem = length();
-			// assertions.
-			assert(x0 >= 0);
-			assert(y0 >= 0);
-			assert(c0 >= 0);
-			assert(x1 <= X);
-			assert(y1 <= Y);
-			assert(c1 <= C);
-		}
-
-		int length() {
-			return std::max(x1-x0, 0) * std::max(y1-y0, 0) * std::max(c1-c0, 0);
-		}
-		bool has_next() {
-			return irem > 0;
-		}
-		int next() {
-			irem--;
-			c++;
-			if(c >= c1) { c=c0; x++; }
-			if(x >= x1) { x=x0; y++; }
-			i = ((y*X) + x)*C + c;
-			return i;
-		}
-	};
-
+	// TODO - remove dependence on "value_image_iterator".
 	/*
 		iterator for accessing images with a tiled memory layout.
 
@@ -203,7 +26,7 @@ namespace ML::image {
 		seems to be a memory bandwidth issue. hopefully it will improve
 		caching performance considerably.
 	*/
-	struct variable_image_tile_iterator {
+	struct value_image_tile_iterator {
 		// image dimensions.
 		int X,Y,C;
 		// current position.
@@ -221,11 +44,11 @@ namespace ML::image {
 		// length of tile in image data.
 		int TILE_LENGTH;
 		// iterates through tiles in the image.
-		variable_image_iterator inner_iterator;
+		value_image_iterator inner_iterator;
 		// iterates through pixels in the current tile.
-		variable_image_iterator outer_iterator;
+		value_image_iterator outer_iterator;
 
-		variable_image_tile_iterator(
+		value_image_tile_iterator(
 			int TX, int TY, int TC,
 			int X, int Y, int C,
 			int x0, int x1,
@@ -291,7 +114,7 @@ namespace ML::image {
 			required to cover image bounds.
 		*/
 		void setup_outer_iterator() {
-			outer_iterator = variable_image_iterator(
+			outer_iterator = value_image_iterator(
 				X/TX, Y/TY, C/TC,
 				x0/TX, x1/TX + (x1%TX != 0 ? 1 : 0),
 				y0/TY, y1/TY + (y1%TY != 0 ? 1 : 0),
@@ -304,11 +127,11 @@ namespace ML::image {
 
 			NOTE: this depends on state of outer_iterator.
 		*/
-		void setup_inner_iterator(const variable_image_iterator& outer) {
+		void setup_inner_iterator(const value_image_iterator& outer) {
 			int tx = outer.x * TX;
 			int ty = outer.y * TY;
 			int tc = outer.c * TC;
-			inner_iterator = variable_image_iterator(
+			inner_iterator = value_image_iterator(
 				TX, TY, TC,
 				std::max(x0-tx, 0), std::min(x1-tx, TX),
 				std::max(y0-ty, 0), std::min(y1-ty, TY),
@@ -324,7 +147,7 @@ namespace ML::image {
 		either by hand or with the help of image iterators.
 	*/
 	template<class T>
-	struct variable_image_tiled {
+	struct value_image_tiled {
 		vector<T> data;
 		int X = 0;// width.
 		int Y = 0;// height.
@@ -336,7 +159,7 @@ namespace ML::image {
 		int x0,x1;
 		int y0,y1;
 
-		variable_image_tiled(
+		value_image_tiled(
 			int X, int Y, int C,
 			int TX, int TY, int TC
 		) {
@@ -358,22 +181,22 @@ namespace ML::image {
 			for(int x=0;x<data.size();x++) data[x] = 0;
 		}
 
-		variable_image_tile_iterator get_iterator(
+		value_image_tile_iterator get_iterator(
 			int x0, int x1,
 			int y0, int y1,
 			int c0, int c1
 		) const {
-			return variable_image_tile_iterator(TX, TY, TC, X, Y, C, x0, x1, y0, y1, c0, c1);
+			return value_image_tile_iterator(TX, TY, TC, X, Y, C, x0, x1, y0, y1, c0, c1);
 		}
 	};
 
-	void sample_area_copy(variable_image_tiled<float>& sample, const file_image& image) {
+	void sample_area_copy(value_image_tiled<float>& sample, const file_image& image) {
 		// assert that image-area and sample-area match.
 		assert((sample.x1 - sample.x0) == image.X);
 		assert((sample.y1 - sample.y0) == image.Y);
 		assert(sample.C == image.C);
 
-		variable_image_tile_iterator sample_iter = sample.get_iterator(
+		value_image_tile_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -390,8 +213,9 @@ namespace ML::image {
 			sample_iter.next();
 		}
 	}
-	void sample_area_nearest_neighbour(variable_image_tiled<float>& sample, const file_image& image) {
-		variable_image_tile_iterator sample_iter = sample.get_iterator(
+
+	void sample_area_nearest_neighbour(value_image_tiled<float>& sample, const file_image& image) {
+		value_image_tile_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -408,7 +232,8 @@ namespace ML::image {
 			sample_iter.next();
 		}
 	}
-	void sample_area_linear(variable_image_tiled<float>& sample, const file_image& image) {
+
+	void sample_area_linear(value_image_tiled<float>& sample, const file_image& image) {
 		// compute float conversions between sample coordinates to image coordinates.
 		vector<int> floor_mx(sample.X+2);
 		vector<int> floor_my(sample.Y+2);
@@ -430,7 +255,7 @@ namespace ML::image {
 			for(int p=0;p<int_to_float.size();p++) int_to_float[p] = float(p);
 		}
 
-		variable_image_tile_iterator sample_iter = sample.get_iterator(
+		value_image_tile_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -487,18 +312,16 @@ namespace ML::image {
 	}
 
 	/*
-		generate input values by sampling loaded training images.
-
-		- if the original image is smaller than the input area,
-		then the image is just copied to input and centered.
-
-		- if the original image is larger than the input area,
-		then it is scaled to fit in input area.
+		generate input values by sampling loaded training images:
+			- if the original image is smaller than the input area,
+			then the image is just copied to input and centered.
+			- if the original image is larger than the input area,
+			then it is scaled to fit in input area.
 
 		values outside the sample area are set to 0 and are ignored
 		when computing error.
 	*/
-	void generate_sample_image(variable_image_tiled<float>& sample, const file_image& image) {
+	void generate_sample_image(value_image_tiled<float>& sample, const file_image& image) {
 		sample.clear();
 
 		// if loaded image is smaller than sample area, then copy.
@@ -541,14 +364,14 @@ namespace ML::image {
 		}
 	};
 
-	file_image to_byte_image(variable_image_tiled<float>& sample, bool clamp_to_sample_area) {
+	file_image to_file_image(value_image_tiled<float>& sample, bool clamp_to_sample_area) {
 		file_image image;
 		image.X = sample.X;
 		image.Y = sample.Y;
 		image.C = sample.C;
 		image.data.resize(image.X * image.Y * image.C);
 
-		variable_image_tile_iterator sample_iter = clamp_to_sample_area ? sample.get_iterator(
+		value_image_tile_iterator sample_iter = clamp_to_sample_area ? sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C

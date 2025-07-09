@@ -290,8 +290,8 @@ namespace ML::models {
 	};
 
 	struct autoencoder {
-		using layer_image = ML::image::variable_image_tiled<float>;
-		using layer_image_iterator = ML::image::variable_image_tile_iterator;
+		using layer_image = ML::image::value_image_tiled<float>;
+		using layer_image_iterator = ML::image::value_image_tile_iterator;
 
 		// TODO - deduplicate (move this to "image.cpp").
 		struct image_dimensions {
@@ -498,7 +498,7 @@ namespace ML::models {
 			WARNING: loss_squared can lead to error-concentration which causes models to explode
 			when training is going well and they are very close to 0 average error.
 		*/
-		void generate_error_image(const variable_image_tiled<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared, bool clamp_error) {
+		void generate_error_image(const value_image_tiled<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared, bool clamp_error) {
 			// assertions.
 			const int IMAGE_SIZE = input.X * input.Y * input.C;
 			assert(input.data.size() == IMAGE_SIZE);
@@ -508,7 +508,7 @@ namespace ML::models {
 			// clear error image.
 			for(int x=0;x<IMAGE_SIZE;x++) error[x] = 0;
 
-			variable_image_tile_iterator sample_iter = input.get_iterator(
+			value_image_tile_iterator sample_iter = input.get_iterator(
 				input.x0, input.x1,
 				input.y0, input.y1,
 				0, input.C
