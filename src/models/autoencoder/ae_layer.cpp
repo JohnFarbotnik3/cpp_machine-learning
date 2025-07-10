@@ -55,24 +55,38 @@ namespace ML::models::autoencoder {
 
 		static float activation_func(float value) {
 			/*
-			 * NOTE: pure ReLU was causing problems.
-			 * now using ReLU with leakage.
-			 * //return std::max<float>(value, 0);
-			 */
-			return value > 0.0f ? value : value * 0.5f;
+				NOTE: pure ReLU was causing problems.
+				now using ReLU with leakage.
+				//return std::max<float>(value, 0);
+				//return value > 0.0f ? value : value * 0.25f;
+			*/
+			float mult = 1.0f;
+			const float mag = std::abs(value);
+			if(mag > 0.5f) mult = 0.9f;
+			if(mag > 1.0f) mult = 0.7f;
+			if(mag > 2.0f) mult = 0.3f;
+			if(mag > 4.0f) mult = 0.1f;
+			return value * mult;
 		}
 
 		static float activation_derivative(float value) {
 			/*
-			 * NOTE: I deliberately picked 1.0f as the derivative before as I was
-			 * worried that weights wouldnt be pushed back up if values got stuck in the negatives.
-			 * this was stupid (I didnt pay close attention to the math), and it caused model degeneration.
-			 * //return 1.0f;
-			 * NOTE: maybe I was right, model seems to get stuck, and when
-			 * the signal_error_term hits zero the neuron stops learning.
-			 * //return value > 0.0f ? 1.0f : 0.0f;
-			 */
-			return value > 0.0f ? 1.0f : 0.5f;
+				NOTE: I deliberately picked 1.0f as the derivative before as I was
+				worried that weights wouldnt be pushed back up if values got stuck in the negatives.
+				this was stupid (I didnt pay close attention to the math), and it caused model degeneration.
+				//return 1.0f;
+				NOTE: maybe I was right, model seems to get stuck, and when
+				the signal_error_term hits zero the neuron stops learning.
+				//return value > 0.0f ? 1.0f : 0.0f;
+				//return value > 0.0f ? 1.0f : 0.25f;
+			*/
+			float mult = 1.0f;
+			const float mag = std::abs(value);
+			if(mag > 0.5f) mult = 0.9f;
+			if(mag > 1.0f) mult = 0.7f;
+			if(mag > 2.0f) mult = 0.3f;
+			if(mag > 4.0f) mult = 0.1f;
+			return mult;
 		}
 
 		// ============================================================
@@ -133,8 +147,10 @@ namespace ML::models::autoencoder {
 					const backprop_target bt = layer.backprop_targets.targets[x];
 					const int& out_n = bt.neuron_index;
 					const float error_term = signal_error_terms[out_n];
-					input_error[n] = error_term * bt.weight;
-					layer.weights_error[x] += error_term * input_value[n];
+					const float num_inputs = layer.foreward_targets.offsets[out_n+1] - layer.foreward_targets.offsets[out_n];
+					const float mult = 1.0f / num_inputs;
+					input_error[n]          = error_term * mult * bt.weight;
+					layer.weights_error[x] += error_term * mult * input_value[n];
 				}
 			}
 		}

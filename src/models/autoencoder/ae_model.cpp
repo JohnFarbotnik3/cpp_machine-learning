@@ -61,7 +61,7 @@ namespace ML::models::autoencoder {
 
 			NOTE: image dimensions A and B must be picked such that image scales cleanly.
 		*/
-		void push_layer_scale_AxA_to_BxB(const image_dimensions idim, image_dimensions& odim, const int A, const int B, const int outC, bool mix_channels) {
+		void push_layer_scale_AxA_to_BxB(const image_dimensions idim, image_dimensions& odim, const int A, const int B, const int inC, const int outC, bool mix_channels) {
 			// make sure images will scale cleanly, and have size compatible with choice of A and B.
 			// - images dimensions should be divisible by A (input) or B (output).
 			// - images should have the same number of AxA or BxB tiles as eachother in each dimension.
@@ -112,22 +112,22 @@ namespace ML::models::autoencoder {
 			// mix and condense image.
 			// (w, h) -> (w/8, h/8)
 			//push_layer_mix_AxA_to_1x1(idim, 3, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 4, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, ch, 4, true); idim = odim;
 			//push_layer_mix_AxA_to_1x1(idim, 5, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 8, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 4, 6, true); idim = odim;
 			//push_layer_mix_AxA_to_1x1(idim, 7, false);
-			//push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 12, true); idim = odim;
+			//push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, ch, ch, true); idim = odim;
 			//push_layer_mix_AxA_to_1x1(idim, 9, false);
 			//push_layer_scale_AxA_to_BxB(idim, odim, 8, 4, 16, true); idim = odim;
 
 			// expand image back to original size.
 			//push_layer_scale_AxA_to_BxB(idim, odim, 4, 8, 12, true); idim = odim;
 			//push_layer_mix_AxA_to_1x1(idim, 9, false);
-			//push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 8, true); idim = odim;
+			//push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, ch, ch, true); idim = odim;
 			//push_layer_mix_AxA_to_1x1(idim, 7, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 4, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 6, 4, true); idim = odim;
 			//push_layer_mix_AxA_to_1x1(idim, 5, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, ch, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 4, ch, true); idim = odim;
 			//push_layer_mix_AxA_to_1x1(idim, 3, false);
 
 			assert(odim.X == idim.X);

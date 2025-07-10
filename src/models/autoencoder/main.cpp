@@ -33,9 +33,8 @@ run:
 -print_model_params 1 \
 -print_model_params_debug 0 \
 -bsz 5 \
--lr 0.01 \
--lr_mult_b 0.1 \
--lr_mult_w 0.9 \
+-lr_b 0.1 \
+-lr_w 0.1 \
 -seed 12345 \
 -n_threads 2
 
@@ -57,9 +56,8 @@ struct training_settings {
 	vector<fs::directory_entry> image_entries;
 	ML::stats::training_stats stats;
 	vector<float> batch_error_trend;
-	float learning_rate;
-	float learning_rate_mult_b;
-	float learning_rate_mult_w;
+	float learning_rate_b;
+	float learning_rate_w;
 	int n_threads;
 	int minibatch_size;
 	int seed;
@@ -187,8 +185,8 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 
 		// apply accumulated error.
 		t0 = timepoint::now();
-		const float lr_b = settings.learning_rate * settings.learning_rate_mult_b;
-		const float lr_w = settings.learning_rate * settings.learning_rate_mult_w;
+		const float lr_b = settings.learning_rate_b;
+		const float lr_w = settings.learning_rate_w;
 		model.apply_batch_error(settings.n_threads, minibatch.size(), lr_b, lr_w);
 		t1 = timepoint::now();
 		settings.stats.push_value("dt apply err", t1.delta_us(t0));
@@ -199,20 +197,25 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 	settings.batch_error_trend.push_back(batch_error / batch_count);
 }
 
-void update_learning_rate(model_t& model, training_settings& settings, int cycles, sample_image_cache& cache) {
-	const float LEARNING_RATE_LIMIT = 0.5f;
+void update_learning_rate(model_t& model, training_settings& settings, int cycles, sample_image_cache& cache, const char mode) {
+	const float LEARNING_RATE_LIMIT = 1.0f;
 	float best_pct_error;
 	training_settings best_settings = settings;
 	model_t best_model = model;
 
-	vector<float> lr_mults = settings.learning_rate >= LEARNING_RATE_LIMIT
+	const float rate = (mode == 'b') ? settings.learning_rate_b : settings.learning_rate_w;
+	if(rate == 0.0f) return;// ignore learning rate if 0.
+	vector<float> lr_mults = rate >= LEARNING_RATE_LIMIT
 		? vector<float>{ 1.0/1.2, 1.0 }
 		: vector<float>{ 1.0/1.2, 1.0, 1.2 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		model_t test_model = model;
-		test_settings.learning_rate = std::min(settings.learning_rate * lr_mults[z], LEARNING_RATE_LIMIT);
-		printf("trying rate = %f\n", test_settings.learning_rate); for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings, cache);
+		const float new_rate = std::min(rate * lr_mults[z], LEARNING_RATE_LIMIT);
+		if(mode == 'b') test_settings.learning_rate_b = new_rate;
+		if(mode == 'w') test_settings.learning_rate_w = new_rate;
+		printf("trying rate [mode=%c] = %f\n", mode, new_rate);
+		for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings, cache);
 		const vector<int> percentiles { 20 };
 		float pct_error = ML::stats::get_percentile_values(percentiles, test_settings.stats.groups.at("avg error"))[0];
 		if(pct_error < best_pct_error || z == 0) {
@@ -302,9 +305,8 @@ int main(const int argc, const char** argv) {
 	int tadjustlr_itv = arguments.get_named_value("-tadjustlr_itv", 50);
 	int tadjustlr_len = arguments.get_named_value("-tadjustlr_len", 10);
 	settings.minibatch_size = arguments.get_named_value("-bsz", 5);
-	settings.learning_rate = arguments.get_named_value("-lr", 0.001f);
-	settings.learning_rate_mult_b = arguments.get_named_value("-lr_mult_b", 1.0f);
-	settings.learning_rate_mult_w = arguments.get_named_value("-lr_mult_w", 1.0f);
+	settings.learning_rate_b = arguments.get_named_value("-lr_b", 0.001f);
+	settings.learning_rate_w = arguments.get_named_value("-lr_w", 0.001f);
 	settings.seed = arguments.get_named_value("-seed", 12345);
 	settings.n_threads = arguments.get_named_value("-n_threads", 1);
 
@@ -313,7 +315,7 @@ int main(const int argc, const char** argv) {
 	ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, 4, 4, input_c);
 	//ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, input_w/2, input_h/2, input_c);// TEST
 	model_t model(input_dimensions);
-	model.init_model_parameters(settings.seed, 0.0f, 0.3f, 0.0f, 0.2f);
+	model.init_model_parameters(settings.seed, 0.0f, 0.1f, 0.0f, 1.0f);
 	//model.init_model_parameters(settings.seed, 0.0f, 0.0f, 1.0f, 0.5f);// TEST
 	printf("==============================\n");
 	if(print_model_params) print_model_parameters(model);
@@ -334,7 +336,13 @@ int main(const int argc, const char** argv) {
 		// run training batch.
 		training_cycle(model, settings, cache);
 		printf("training cycle: %i/%i | error: %f\n", z+1, n_training_cycles, error_trend.back());
-		if(z % (n_training_cycles/100) == 0) fprintf(stderr, "TRAINING: z=%i/%i, lr=%f, er=%f\n", z+1, n_training_cycles, settings.learning_rate, error_trend.back());
+		if(z % (n_training_cycles/100) == 0) fprintf(stderr, "TRAINING: z=%i/%i, lr_b=%f, lr_w=%f, er=%f\n",
+			z+1,
+			n_training_cycles,
+			settings.learning_rate_b,
+			settings.learning_rate_w,
+			error_trend.back()
+		);
 		const float err_curr = error_trend.back();
 		const float err_prev = error_trend[error_trend.size()-5];
 		if(error_trend.size() >= 5 && err_curr > err_prev) {
@@ -351,8 +359,9 @@ int main(const int argc, const char** argv) {
 		// update learning rate.
 		if(z % tadjustlr_itv == 0 && (z > 0 || tadjustlr_ini)) {
 			printf("updating learning rate:\n");
-			update_learning_rate(model, settings, tadjustlr_len, cache);
-			printf("new learning rate: %f\n", settings.learning_rate);
+			update_learning_rate(model, settings, tadjustlr_len, cache, 'b');
+			update_learning_rate(model, settings, tadjustlr_len, cache, 'w');
+			printf("new learning rate: lr_b=%f, lr_w=%f\n", settings.learning_rate_b, settings.learning_rate_w);
 			z += tadjustlr_len;
 		}
 		// TODO TEST

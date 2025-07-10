@@ -188,8 +188,9 @@ is a better and more stable choice (TODO: test).
 x long run with 30 images crashed at z=~1000/2000, see logs.
 ** remove assertion in backprop normalization that insum & outsum > 0,
 and replace with an if-condition + a warning printed to console.
-x weights arent initialized correctly! if there is 100 weights into 1 neuron,
-	then the total input signal would be massive.
+** TODO: write general push_layer function, which allows
+both scaling and AxA_BxB mixing at the same time.
+** decouple bias learning rate and weight learning rate.
 ...
 
 
