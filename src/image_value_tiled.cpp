@@ -140,6 +140,38 @@ namespace ML::image {
 		}
 	};
 
+	struct image_dimensions {
+		int X = 0;
+		int Y = 0;
+		int C = 0;
+		int TX = 0;
+		int TY = 0;
+		int TC = 0;
+
+		int length() const {
+			return X * Y * C;
+		}
+
+		value_image_tile_iterator get_iterator(int x0, int x1, int y0, int y1, int c0, int c1) const {
+			return value_image_tile_iterator(TX, TY, TC, X, Y, C, x0, x1, y0, y1, c0, c1);
+		}
+		value_image_tile_iterator get_iterator() const {
+			return value_image_tile_iterator(TX, TY, TC, X, Y, C, 0, X, 0, Y, 0, C);
+		}
+
+		vector<int> generate_target_indices(int x0, int x1, int y0, int y1, int ch=-1) const {
+			int c0 = (ch == -1) ? 0 : ch;
+			int c1 = (ch == -1) ? C : ch+1;
+			value_image_tile_iterator iter = get_iterator(x0, x1, y0, y1, c0, c1);
+			vector<int> list;
+			while(iter.has_next()) {
+				list.push_back(iter.i);
+				iter.next();
+			}
+			return list;
+		}
+	};
+
 	/*
 		an image with a variable number of channels.
 

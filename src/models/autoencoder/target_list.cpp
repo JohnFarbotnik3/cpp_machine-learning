@@ -1,7 +1,7 @@
 
 #include <vector>
 
-namespace ML::target_list {
+namespace ML::models::autoencoder {
 
 	// target pointing to neuron in previous layer, used for foreward-propagation.
 	struct foreward_target {

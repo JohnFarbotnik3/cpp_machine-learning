@@ -181,23 +181,17 @@ rate this should get model to actually finish training the "dead pixels" (I hope
 ** try smaller bias distribution (reduced stdev),
 	and add commandline arguments for model-parameter distributions.
 ** clamp output image values when generating image files / previews.
+** loss_squared may not actually converge faster, since the error numbers it gives
+are reduced by squaring values below 1. it is entirely plausible that loss_linear
+is a better and more stable choice (TODO: test).
+** re-examine ReLU with leakage, it may not be necessary.
 x long run with 30 images crashed at z=~1000/2000, see logs.
+** remove assertion in backprop normalization that insum & outsum > 0,
+and replace with an if-condition + a warning printed to console.
+x weights arent initialized correctly! if there is 100 weights into 1 neuron,
+	then the total input signal would be massive.
 ...
 
-
-
-> write journal post:
-- why forewardprop-targets (as opposed to fixed architecture).
-- why backprop-targets (to allow multithreading - "read style" vs "write style").
-- adaptive learning rate implementation.
-- why ReLU with leakage.
-- backprop error gradient normalization (a potential issue with concentrating error gradient).
-- why tiled images (show pictures with scanline vs tiled memory layouts).
-- current issues
-	- model degeneration - suspected to be caused by an interaction between loss_squared and error gradient concentration.
-	- "dead pixels" - it seems that they were caused by underflow and overflow, which was fixed by clamping output preview images.
-	- switching to fixed layers.
-...
 
 
 

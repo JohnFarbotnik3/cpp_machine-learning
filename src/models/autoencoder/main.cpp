@@ -1,24 +1,25 @@
-#include "../utils/commandline.cpp"
-#include "../utils/random.cpp"
-#include "../utils/vector_util.cpp"
-#include "../image.cpp"
-#include "../image_file.cpp"
-#include "../stats.cpp"
-#include "../models/autoencoder.cpp"
+
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include "src/utils/commandline.cpp"
+#include "src/utils/random.cpp"
+#include "src/utils/vector_util.cpp"
+#include "src/image_file.cpp"
+#include "src/image_value_tiled.cpp"
+#include "src/stats.cpp"
+#include "src/models/autoencoder/ae_model.cpp"
 
 /*
 debug build:
-g++ -std=c++23 -O2 -fsanitize=address -o "./src/projects/autoencoder.elf" "./src/projects/autoencoder.cpp"
+g++ -std=c++23 -O2 -fsanitize=address -o "./src/models/autoencoder/main.elf" "./src/models/autoencoder/main.cpp"
 
 build:
-g++ -std=c++23 -O2 -o "./src/projects/autoencoder.elf" "./src/projects/autoencoder.cpp"
-g++ -std=c++23 -O2 -march=native -o "./src/projects/autoencoder.elf" "./src/projects/autoencoder.cpp"
+g++ -std=c++23 -O2 -I "./" -o "./src/models/autoencoder/main.elf" "./src/models/autoencoder/main.cpp"
+g++ -std=c++23 -O2 -I "./" -march=native -o "./src/models/autoencoder/main.elf" "./src/models/autoencoder/main.cpp"
 
 run:
-./src/projects/autoencoder.elf \
+./src/models/autoencoder/main.elf \
 -m ./data/models \
 -i ./data/images/images_02 \
 -o ./data/output/images_02 \
@@ -34,7 +35,7 @@ run:
 -bsz 5 \
 -lr 0.01 \
 -lr_mult_b 0.1 \
--lr_mult_w 1.0 \
+-lr_mult_w 0.9 \
 -seed 12345 \
 -n_threads 2
 
@@ -49,7 +50,7 @@ using std::string;
 using std::vector;
 using timepoint = ML::stats::timepoint;
 namespace fs = std::filesystem;
-using model_t = ML::models::autoencoder;
+using model_t = ML::models::autoencoder::ae_model;
 using model_image_t = ML::image::value_image_tiled<float>;
 
 struct training_settings {
@@ -97,7 +98,7 @@ struct sample_image_cache {
 	}
 };
 
-void training_cycle(ML::models::autoencoder& model, training_settings& settings, sample_image_cache& cache) {
+void training_cycle(model_t& model, training_settings& settings, sample_image_cache& cache) {
 	// divide image entries into batches.
 	vector<fs::directory_entry> pool = settings.image_entries;
 	vector<vector<fs::directory_entry>> image_minibatches;
@@ -167,7 +168,7 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 
 			// compute error.
 			t0 = timepoint::now();
-			model.generate_error_image(image_input_img, image_output, image_error, true, true);
+			model.generate_error_image(image_input_img, image_output, image_error, false, true);
 			const float avg_error = utils::vector_util::vec_sum_abs_mt(image_error, 0, image_error.size(), settings.n_threads) / image_error.size();
 			batch_error += avg_error;
 			batch_count += 1.0f;
@@ -198,18 +199,18 @@ void training_cycle(ML::models::autoencoder& model, training_settings& settings,
 	settings.batch_error_trend.push_back(batch_error / batch_count);
 }
 
-void update_learning_rate(ML::models::autoencoder& model, training_settings& settings, int cycles, sample_image_cache& cache) {
+void update_learning_rate(model_t& model, training_settings& settings, int cycles, sample_image_cache& cache) {
 	const float LEARNING_RATE_LIMIT = 0.5f;
 	float best_pct_error;
 	training_settings best_settings = settings;
-	ML::models::autoencoder best_model = model;
+	model_t best_model = model;
 
 	vector<float> lr_mults = settings.learning_rate >= LEARNING_RATE_LIMIT
 		? vector<float>{ 1.0/1.2, 1.0 }
 		: vector<float>{ 1.0/1.2, 1.0, 1.2 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
-		ML::models::autoencoder test_model = model;
+		model_t test_model = model;
 		test_settings.learning_rate = std::min(settings.learning_rate * lr_mults[z], LEARNING_RATE_LIMIT);
 		printf("trying rate = %f\n", test_settings.learning_rate); for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings, cache);
 		const vector<int> percentiles { 20 };
@@ -237,7 +238,7 @@ void print_training_stats(ML::stats::training_stats& stats) {
 	}
 }
 
-void print_model_parameters(ML::models::autoencoder& model) {
+void print_model_parameters(model_t& model) {
 	const vector<int> percentiles { 0, 1, 3, 10, 25, 50, 75, 90, 97, 99, 100 };
 	const int FIRST_COLUMN_WIDTH = 20;
 	const int SUM_COLUMN_WIDTH = 15;
@@ -311,7 +312,7 @@ int main(const int argc, const char** argv) {
 	printf("initializing model.\n");
 	ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, 4, 4, input_c);
 	//ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, input_w/2, input_h/2, input_c);// TEST
-	ML::models::autoencoder model(input_dimensions);
+	model_t model(input_dimensions);
 	model.init_model_parameters(settings.seed, 0.0f, 0.3f, 0.0f, 0.2f);
 	//model.init_model_parameters(settings.seed, 0.0f, 0.0f, 1.0f, 0.5f);// TEST
 	printf("==============================\n");
