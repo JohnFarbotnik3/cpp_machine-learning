@@ -125,6 +125,7 @@ namespace ML::models::autoencoder {
 			// for each neuron in input...
 			for(int n=i_beg;n<i_end;n++) {
 				// gather input-error and weight-error.
+				float input_error_sum = 0;
 				const target_itv itv = layer.backprop_targets.get_interval(n);
 				for(int x=itv.beg;x<itv.end;x++) {
 					const backprop_target bt = layer.backprop_targets.targets[x];
@@ -132,9 +133,10 @@ namespace ML::models::autoencoder {
 					const float error_term = signal_error_terms[out_n];
 					const float num_inputs = layer.foreward_targets.offsets[out_n+1] - layer.foreward_targets.offsets[out_n];
 					const float mult = 1.0f / num_inputs;
-					input_error[n]          = error_term * mult * bt.weight;
+					input_error_sum        += error_term * mult * bt.weight;
 					layer.weights_error[x] += error_term * mult * input_value[n];
 				}
+				input_error[n] = input_error_sum;
 			}
 		}
 
