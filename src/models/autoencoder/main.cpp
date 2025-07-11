@@ -206,8 +206,8 @@ void update_learning_rate(model_t& model, training_settings& settings, int cycle
 	const float rate = (mode == 'b') ? settings.learning_rate_b : settings.learning_rate_w;
 	if(rate == 0.0f) return;// ignore learning rate if 0.
 	vector<float> lr_mults = rate >= LEARNING_RATE_LIMIT
-		? vector<float>{ 1.0/1.2, 1.0 }
-		: vector<float>{ 1.0/1.2, 1.0, 1.2 };
+		? vector<float>{ 0.7, 1.0 }
+		: vector<float>{ 0.7, 1.0, 1.2 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		model_t test_model = model;

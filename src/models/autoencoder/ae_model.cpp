@@ -111,24 +111,14 @@ namespace ML::models::autoencoder {
 
 			// mix and condense image.
 			// (w, h) -> (w/8, h/8)
-			//push_layer_mix_AxA_to_1x1(idim, 3, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, ch, 4, true); idim = odim;
-			//push_layer_mix_AxA_to_1x1(idim, 5, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, 4, 6, true); idim = odim;
-			//push_layer_mix_AxA_to_1x1(idim, 7, false);
-			//push_layer_scale_AxA_to_BxB(idim, odim, 4, 2, ch, ch, true); idim = odim;
-			//push_layer_mix_AxA_to_1x1(idim, 9, false);
-			//push_layer_scale_AxA_to_BxB(idim, odim, 8, 4, 16, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 3, false);
+			push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, ch, 12, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, 12, 16, true); idim = odim;
 
 			// expand image back to original size.
-			//push_layer_scale_AxA_to_BxB(idim, odim, 4, 8, 12, true); idim = odim;
-			//push_layer_mix_AxA_to_1x1(idim, 9, false);
-			//push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, ch, ch, true); idim = odim;
-			//push_layer_mix_AxA_to_1x1(idim, 7, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 6, 4, true); idim = odim;
-			//push_layer_mix_AxA_to_1x1(idim, 5, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 2, 4, 4, ch, true); idim = odim;
-			//push_layer_mix_AxA_to_1x1(idim, 3, false);
+			push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 16, 12, true); idim = odim;
+			push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 12, ch, true); idim = odim;
+			push_layer_mix_AxA_to_1x1(idim, 3, false);
 
 			assert(odim.X == idim.X);
 			assert(odim.Y == idim.Y);
