@@ -1,32 +1,17 @@
 
-#ifndef F_image
-#define F_image
+#ifndef F_image_value
+#define F_image_value
 
 #include <algorithm>
 #include <cassert>
 #include <vector>
-#include "./image_file.cpp"
-#include "./image_value.cpp"
+#include "file_image.cpp"
 
-/*
-	NOTE: this namespace assumes that image-data is in row-major form
-	starting from bottom-left corner, and that RGBA values are interleaved.
-*/
 namespace ML::image {
 	using std::vector;
 
-	// TODO - remove dependence on "value_image_iterator".
-	/*
-		iterator for accessing images with a tiled memory layout.
-
-		effectively, the super-image is made of a grid of sub-images,
-		which are themselves made of a grid of pixels.
-
-		NOTE: this is an act of desperation to try an fix what
-		seems to be a memory bandwidth issue. hopefully it will improve
-		caching performance considerably.
-	*/
-	struct value_image_tile_iterator {
+	/* iterator for scanline images. */
+	struct value_image_lines_iterator {
 		// image dimensions.
 		int X,Y,C;
 		// current position.
@@ -39,17 +24,9 @@ namespace ML::image {
 		int i;
 		// iterator steps remaining.
 		int irem;
-		// tile dimensions.
-		int TX,TY,TC;
-		// length of tile in image data.
-		int TILE_LENGTH;
-		// iterates through tiles in the image.
-		value_image_iterator inner_iterator;
-		// iterates through pixels in the current tile.
-		value_image_iterator outer_iterator;
 
-		value_image_tile_iterator(
-			int TX, int TY, int TC,
+		value_image_lines_iterator() = default;
+		value_image_lines_iterator(
 			int X, int Y, int C,
 			int x0, int x1,
 			int y0, int y1,
@@ -58,10 +35,6 @@ namespace ML::image {
 			this->X = X;
 			this->Y = Y;
 			this->C = C;
-			this->TX = TX;
-			this->TY = TY;
-			this->TC = TC;
-			TILE_LENGTH = TX * TY * TC;
 			this->x0 = x0;
 			this->x1 = x1;
 			this->y0 = y0;
@@ -71,9 +44,7 @@ namespace ML::image {
 			this->x = x0;
 			this->y = y0;
 			this->c = c0;
-			setup_outer_iterator();
-			setup_inner_iterator(outer_iterator);
-			this->i = outer_iterator.i * TILE_LENGTH + inner_iterator.i;
+			this->i = ((y * X) + x) * C + c;
 			this->irem = length();
 			// assertions.
 			assert(x0 >= 0);
@@ -82,9 +53,6 @@ namespace ML::image {
 			assert(x1 <= X);
 			assert(y1 <= Y);
 			assert(c1 <= C);
-			assert(X % TX == 0);
-			assert(Y % TY == 0);
-			assert(C % TC == 0);
 		}
 
 		int length() {
@@ -95,91 +63,33 @@ namespace ML::image {
 		}
 		int next() {
 			irem--;
-			//printf("next: x=%i, y=%i, c=%i, i=%i\n", x, y, c, i);
-			inner_iterator.next();
-			if(!inner_iterator.has_next()) {
-				outer_iterator.next();
-				setup_inner_iterator(outer_iterator);
-			}
-			x = outer_iterator.x * TX + inner_iterator.x;
-			y = outer_iterator.y * TY + inner_iterator.y;
-			c = outer_iterator.c * TC + inner_iterator.c;
-			i = outer_iterator.i * TILE_LENGTH + inner_iterator.i;
+			c++;
+			if(c >= c1) { c=c0; x++; }
+			if(x >= x1) { x=x0; y++; }
+			i = ((y*X) + x)*C + c;
 			return i;
-		}
-
-	private:
-		/*
-			create iterator that iterates through all tiles
-			required to cover image bounds.
-		*/
-		void setup_outer_iterator() {
-			outer_iterator = value_image_iterator(
-				X/TX, Y/TY, C/TC,
-				x0/TX, x1/TX + (x1%TX != 0 ? 1 : 0),
-				y0/TY, y1/TY + (y1%TY != 0 ? 1 : 0),
-				c0/TC, c1/TC + (c1%TC != 0 ? 1 : 0)
-			);
-		}
-		/*
-			create iterator that iterates through pixels in tile,
-			clamped to image bounds.
-
-			NOTE: this depends on state of outer_iterator.
-		*/
-		void setup_inner_iterator(const value_image_iterator& outer) {
-			int tx = outer.x * TX;
-			int ty = outer.y * TY;
-			int tc = outer.c * TC;
-			inner_iterator = value_image_iterator(
-				TX, TY, TC,
-				std::max(x0-tx, 0), std::min(x1-tx, TX),
-				std::max(y0-ty, 0), std::min(y1-ty, TY),
-				std::max(c0-tc, 0), std::min(c1-tc, TC)
-			);
 		}
 	};
 
-	struct image_dimensions {
+	struct value_image_lines_dimensions {
 		int X = 0;
 		int Y = 0;
 		int C = 0;
-		int TX = 0;
-		int TY = 0;
-		int TC = 0;
 
 		int length() const {
 			return X * Y * C;
 		}
 
-		value_image_tile_iterator get_iterator(int x0, int x1, int y0, int y1, int c0, int c1) const {
-			return value_image_tile_iterator(TX, TY, TC, X, Y, C, x0, x1, y0, y1, c0, c1);
+		value_image_lines_iterator get_iterator(int x0, int x1, int y0, int y1, int c0, int c1) const {
+			return value_image_lines_iterator(X, Y, C, x0, x1, y0, y1, c0, c1);
 		}
-		value_image_tile_iterator get_iterator() const {
-			return value_image_tile_iterator(TX, TY, TC, X, Y, C, 0, X, 0, Y, 0, C);
-		}
-
-		vector<int> generate_target_indices(int x0, int x1, int y0, int y1, int ch=-1) const {
-			int c0 = (ch == -1) ? 0 : ch;
-			int c1 = (ch == -1) ? C : ch+1;
-			value_image_tile_iterator iter = get_iterator(x0, x1, y0, y1, c0, c1);
-			vector<int> list;
-			while(iter.has_next()) {
-				list.push_back(iter.i);
-				iter.next();
-			}
-			return list;
+		value_image_lines_iterator get_iterator() const {
+			return value_image_lines_iterator(X, Y, C, 0, X, 0, Y, 0, C);
 		}
 	};
 
-	/*
-		an image with a variable number of channels.
-
-		NOTE: this is intended to be populated externally,
-		either by hand or with the help of image iterators.
-	*/
 	template<class T>
-	struct value_image_tiled {
+	struct value_image_lines {
 		vector<T> data;
 		int X = 0;// width.
 		int Y = 0;// height.
@@ -191,20 +101,10 @@ namespace ML::image {
 		int x0,x1;
 		int y0,y1;
 
-		value_image_tiled(
-			int X, int Y, int C,
-			int TX, int TY, int TC
-		) {
-			assert(X % TX == 0);
-			assert(Y % TY == 0);
-			assert(C % TC == 0);
-
+		value_image_lines(int X, int Y, int C) {
 			this->X = X;
 			this->Y = Y;
 			this->C = C;
-			this->TX = TX;
-			this->TY = TY;
-			this->TC = TC;
 			this->data.resize(X * Y * C);
 			clear();
 		}
@@ -213,22 +113,22 @@ namespace ML::image {
 			for(int x=0;x<data.size();x++) data[x] = 0;
 		}
 
-		value_image_tile_iterator get_iterator(
+		value_image_lines_iterator get_iterator(
 			int x0, int x1,
 			int y0, int y1,
 			int c0, int c1
 		) const {
-			return value_image_tile_iterator(TX, TY, TC, X, Y, C, x0, x1, y0, y1, c0, c1);
+			return value_image_lines_iterator(X, Y, C, x0, x1, y0, y1, c0, c1);
 		}
 	};
 
-	void sample_area_copy(value_image_tiled<float>& sample, const file_image& image) {
+	void sample_area_copy(value_image_lines<float>& sample, const file_image& image) {
 		// assert that image-area and sample-area match.
 		assert((sample.x1 - sample.x0) == image.X);
 		assert((sample.y1 - sample.y0) == image.Y);
 		assert(sample.C == image.C);
 
-		value_image_tile_iterator sample_iter = sample.get_iterator(
+		value_image_lines_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -246,8 +146,8 @@ namespace ML::image {
 		}
 	}
 
-	void sample_area_nearest_neighbour(value_image_tiled<float>& sample, const file_image& image) {
-		value_image_tile_iterator sample_iter = sample.get_iterator(
+	void sample_area_nearest_neighbour(value_image_lines<float>& sample, const file_image& image) {
+		value_image_lines_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -265,7 +165,7 @@ namespace ML::image {
 		}
 	}
 
-	void sample_area_linear(value_image_tiled<float>& sample, const file_image& image) {
+	void sample_area_linear(value_image_lines<float>& sample, const file_image& image) {
 		// compute float conversions between sample coordinates to image coordinates.
 		vector<int> floor_mx(sample.X+2);
 		vector<int> floor_my(sample.Y+2);
@@ -287,7 +187,7 @@ namespace ML::image {
 			for(int p=0;p<int_to_float.size();p++) int_to_float[p] = float(p);
 		}
 
-		value_image_tile_iterator sample_iter = sample.get_iterator(
+		value_image_lines_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -353,7 +253,7 @@ namespace ML::image {
 		values outside the sample area are set to 0 and are ignored
 		when computing error.
 	*/
-	void generate_sample_image(value_image_tiled<float>& sample, const file_image& image) {
+	void generate_sample_image(value_image_lines<float>& sample, const file_image& image) {
 		sample.clear();
 
 		// if loaded image is smaller than sample area, then copy.
@@ -396,14 +296,14 @@ namespace ML::image {
 		}
 	};
 
-	file_image to_file_image(value_image_tiled<float>& sample, bool clamp_to_sample_area) {
+	file_image to_file_image(value_image_lines<float>& sample, bool clamp_to_sample_area) {
 		file_image image;
 		image.X = sample.X;
 		image.Y = sample.Y;
 		image.C = sample.C;
 		image.data.resize(image.X * image.Y * image.C);
 
-		value_image_tile_iterator sample_iter = clamp_to_sample_area ? sample.get_iterator(
+		value_image_lines_iterator sample_iter = clamp_to_sample_area ? sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
 			0, image.C
@@ -431,13 +331,3 @@ namespace ML::image {
 }
 
 #endif
-
-
-
-
-
-
-
-
-
-

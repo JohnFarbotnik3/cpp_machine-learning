@@ -1,52 +1,50 @@
 
 #include <vector>
 #include "src/utils/vector_util.cpp"
-#include "./target_list.cpp"
+#include "src/image/value_image_lines.cpp"
 
 namespace ML::models::autoencoder {
 	using std::vector;
 	using namespace utils::vector_util;
+	using namespace ML::image;
 
-	/*
-		a single layer network of forward-connected neurons.
-		NOTE: this network is intended to be populated externally.
-	*/
+	struct scale_ratio {
+		int A;// input  - AxA square.
+		int B;// output - BxB square.
+		int C;// input area - a CxC square centered on scaled position in previous layer.
+	};
+
+	template<scale_ratio SCALE>
 	struct ae_layer {
 		vector<float> biases;
 		vector<float> output;// image of output values - used for backprop.
 		vector<float> signal;// image of signal values - used for backprop.
+		vector<float> weights;
 		vector<float> biases_error;// accumulated error in biases during minibatch.
 		vector<float> weights_error;// accumulated error in weights during minibatch.
-		foreward_target_list foreward_targets;
-		backprop_target_list backprop_targets;// inverse of this layer's foreward_targets.
-		int INPUT_IMAGE_SIZE;
-		int OUTPUT_IMAGE_SIZE;
+		value_image_lines_dimensions dim;
 
-		ae_layer(int INPUT_IMAGE_SIZE, int OUTPUT_IMAGE_SIZE) :
-			biases(OUTPUT_IMAGE_SIZE),
-			output(OUTPUT_IMAGE_SIZE),
-			signal(OUTPUT_IMAGE_SIZE),
-			biases_error(OUTPUT_IMAGE_SIZE)
-		{
-			this->INPUT_IMAGE_SIZE = INPUT_IMAGE_SIZE;
-			this->OUTPUT_IMAGE_SIZE = OUTPUT_IMAGE_SIZE;
+		ae_layer(const value_image_lines_dimensions dim) {
+			this->dim = dim;
+			const int OUTPUT_IMAGE_SIZE = output_image_size();
+			biases.resize(OUTPUT_IMAGE_SIZE);
+			output.resize(OUTPUT_IMAGE_SIZE);
+			signal.resize(OUTPUT_IMAGE_SIZE);
+			weights.resize(OUTPUT_IMAGE_SIZE * weights_per_neuron());
 			vec_fill(biases, 0.0f);
 			vec_fill(output, 0.0f);
 			vec_fill(signal, 0.0f);
 			vec_fill(biases_error, 0.0f);
 		}
 
-		int input_image_size() {
-			return INPUT_IMAGE_SIZE;
+		int input_image_size() const {
+			return dim.length() * (SCALE.A * SCALE.A) / (SCALE.B * SCALE.B);
 		}
-		int output_image_size() {
-			return OUTPUT_IMAGE_SIZE;
+		int output_image_size() const {
+			return dim.length();
 		}
-
-		void sync_targets_list() {
-			backprop_targets = foreward_targets.get_inverse(INPUT_IMAGE_SIZE);
-			foreward_targets.save_weights(backprop_targets);
-			weights_error.resize(foreward_targets.targets.size());
+		int weights_per_neuron() const {
+			return SCALE.C * SCALE.C;
 		}
 
 		// ============================================================
@@ -76,6 +74,11 @@ namespace ML::models::autoencoder {
 		// network functions
 		// ------------------------------------------------------------
 
+		struct image_bounds {
+			int x0, x1;
+			int y0, y1;
+		};
+
 		static vector<int> generate_intervals(int n_threads, int length) {
 			vector<int> intervals;
 			for(int x=0;x<=n_threads;x++) intervals.push_back((x * length) / n_threads);
@@ -83,7 +86,15 @@ namespace ML::models::autoencoder {
 			return intervals;
 		}
 
-		static void propagate_func(ae_layer& layer, const vector<float>& input_values, vector<float>& output_values, const int o_beg, int const o_end) {
+		static void propagate_func(
+			ae_layer& layer,
+			const vector<float>& input_values,
+			vector<float>& output_values,
+			const image_bounds o_area
+		) {
+			// TODO - middle of image
+			// TODO - image edges
+
 			// compute activations.
 			const int IMAGE_SIZE = layer.output_image_size();
 			for(int n=o_beg;n<o_end;n++) {

@@ -5,12 +5,12 @@
 #include <cstddef>
 #include <cstring>
 #include <vector>
-#include "./utils/file_io.cpp"
+#include "src/utils/file_io.cpp"
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "./stb-master/stb_image.h"
+#include "src/stb-master/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "./stb-master/stb_image_write.h"
+#include "src/stb-master/stb_image_write.h"
 
 namespace ML::image {
 	namespace fs = std::filesystem;

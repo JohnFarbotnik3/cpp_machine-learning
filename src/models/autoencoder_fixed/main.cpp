@@ -6,20 +6,20 @@
 #include "src/utils/random.cpp"
 #include "src/utils/vector_util.cpp"
 #include "src/image/file_image.cpp"
-#include "src/image/value_image_tiles.cpp"
+#include "src/image/value_image_lines.cpp"
 #include "src/stats.cpp"
-#include "src/models/autoencoder/ae_model.cpp"
+#include "src/models/autoencoder_fixed/ae_model.cpp"
 
 /*
 debug build:
-g++ -std=c++23 -O2 -fsanitize=address -o "./src/models/autoencoder/main.elf" "./src/models/autoencoder/main.cpp"
+g++ -std=c++23 -O2 -fsanitize=address -o "./src/modes/autoencoder_fixed/main.elf" "./src/modes/autoencoder_fixed/main.cpp"
 
 build:
-g++ -std=c++23 -O2 -I "./" -o "./src/models/autoencoder/main.elf" "./src/models/autoencoder/main.cpp"
-g++ -std=c++23 -O2 -I "./" -march=native -o "./src/models/autoencoder/main.elf" "./src/models/autoencoder/main.cpp"
+g++ -std=c++23 -O2 -I "./" -o "./src/modes/autoencoder_fixed/main.elf" "./src/modes/autoencoder_fixed/main.cpp"
+g++ -std=c++23 -O2 -I "./" -march=native -o "./src/modes/autoencoder_fixed/main.elf" "./src/modes/autoencoder_fixed/main.cpp"
 
 run:
-./src/models/autoencoder/main.elf \
+./src/modes/autoencoder_fixed/main.elf \
 -m ./data/models \
 -i ./data/images/images_02 \
 -o ./data/output/images_02 \

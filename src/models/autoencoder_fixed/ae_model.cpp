@@ -2,7 +2,7 @@
 #include <cassert>
 #include <vector>
 #include <algorithm>
-#include "src/image/value_image_tiles.cpp"
+#include "src/image/value_image_lines.cpp"
 #include "src/utils/random.cpp"
 #include "src/utils/simd.cpp"
 #include "src/utils/vector_util.cpp"
@@ -14,13 +14,13 @@ namespace ML::models::autoencoder {
 	using namespace utils::vector_util;
 
 	struct ae_model {
-		using layer_image = ML::image::value_image_tiles<float>;
-		using layer_image_iterator = ML::image::value_image_tiles_iterator;
+		using layer_image = ML::image::value_image_lines<float>;
+		//using layer_image_iterator = ML::image::value_image_lines_iterator;
 
-		value_image_tiles_dimensions input_dimensions;
+		image_dimensions input_dimensions;
 		vector<ae_layer> layers;
 
-		ae_model(value_image_tiles_dimensions input_dimensions) {
+		ae_model(image_dimensions input_dimensions) {
 			this->input_dimensions = input_dimensions;
 			init_model_topology();
 		}
@@ -37,7 +37,7 @@ namespace ML::models::autoencoder {
 			pixel-value-neuron in output.
 			- if mix_channels is false, channels are kept seperate.
 		*/
-		void push_layer_mix_AxA_to_1x1(const value_image_tiles_dimensions dim, const int A, bool mix_channels) {
+		void push_layer_mix_AxA_to_1x1(const image_dimensions dim, const int A, bool mix_channels) {
 			// create output layer and generate targets for each neuron (pixel-value) in output.
 			// NOTE: the order these target-lists are generated in must match order of neurons.
 			layers.push_back(ae_layer(dim.length(), dim.length()));
@@ -61,7 +61,7 @@ namespace ML::models::autoencoder {
 
 			NOTE: image dimensions A and B must be picked such that image scales cleanly.
 		*/
-		void push_layer_scale_AxA_to_BxB(const value_image_tiles_dimensions idim, value_image_tiles_dimensions& odim, const int A, const int B, const int inC, const int outC, bool mix_channels) {
+		void push_layer_scale_AxA_to_BxB(const image_dimensions idim, image_dimensions& odim, const int A, const int B, const int inC, const int outC, bool mix_channels) {
 			// make sure images will scale cleanly, and have size compatible with choice of A and B.
 			// - images dimensions should be divisible by A (input) or B (output).
 			// - images should have the same number of AxA or BxB tiles as eachother in each dimension.
@@ -105,8 +105,8 @@ namespace ML::models::autoencoder {
 			layers.clear();
 
 			// input.
-			value_image_tiles_dimensions idim = input_dimensions;
-			value_image_tiles_dimensions odim = idim;
+			image_dimensions idim = input_dimensions;
+			image_dimensions odim = idim;
 			const int ch = idim.C;
 
 			// mix and condense image.
@@ -182,7 +182,7 @@ namespace ML::models::autoencoder {
 			WARNING: loss_squared can lead to error-concentration which causes models to explode
 			when training is going well and they are very close to 0 average error.
 		*/
-		void generate_error_image(const value_image_tiles<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared, bool clamp_error) {
+		void generate_error_image(const value_image_tiled<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared, bool clamp_error) {
 			// assertions.
 			const int IMAGE_SIZE = input.X * input.Y * input.C;
 			assert(input.data.size() == IMAGE_SIZE);
@@ -192,7 +192,7 @@ namespace ML::models::autoencoder {
 			// clear error image.
 			for(int x=0;x<IMAGE_SIZE;x++) error[x] = 0;
 
-			value_image_tiles_iterator sample_iter = input.get_iterator(
+			value_image_tile_iterator sample_iter = input.get_iterator(
 				input.x0, input.x1,
 				input.y0, input.y1,
 				0, input.C
