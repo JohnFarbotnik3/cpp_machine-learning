@@ -72,12 +72,23 @@ namespace ML::image {
 	};
 
 	struct value_image_lines_dimensions {
-		int X = 0;
-		int Y = 0;
-		int C = 0;
+		int X = 0;// width of image.
+		int Y = 0;// height of image.
+		int C = 0;// number of channels per pixel.
 
 		int length() const {
 			return X * Y * C;
+		}
+
+		int get_offset(const int x, const int y, const int c) const {
+			return ((y*X) + x)*C + c;
+		}
+
+		bool is_within_bounds(const int x, const int y) const {
+			return (
+				(x >= 0) & (x < X) &
+				(y >= 0) & (y < Y)
+			);
 		}
 
 		value_image_lines_iterator get_iterator(int x0, int x1, int y0, int y1, int c0, int c1) const {

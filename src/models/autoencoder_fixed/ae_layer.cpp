@@ -14,7 +14,18 @@ namespace ML::models::autoencoder {
 		int C;// input area - a CxC square centered on scaled position in previous layer.
 	};
 
-	template<scale_ratio SCALE>
+	struct image_area {
+		int x0, x1;
+		int y0, y1;
+
+		bool is_within_image_bounds(const value_image_lines_dimensions dim) const {
+			return (
+				(x0 > 0) & (x1 <= dim.X) &
+				(y0 > 0) & (y1 <= dim.Y)
+			);
+		}
+	};
+
 	struct ae_layer {
 		vector<float> biases;
 		vector<float> output;// image of output values - used for backprop.
@@ -22,29 +33,44 @@ namespace ML::models::autoencoder {
 		vector<float> weights;
 		vector<float> biases_error;// accumulated error in biases during minibatch.
 		vector<float> weights_error;// accumulated error in weights during minibatch.
-		value_image_lines_dimensions dim;
+		const value_image_lines_dimensions idim;// input image dimensions.
+		const value_image_lines_dimensions odim;// output image dimensions.
+		const scale_ratio scale;
 
-		ae_layer(const value_image_lines_dimensions dim) {
-			this->dim = dim;
+		ae_layer(
+			const value_image_lines_dimensions idim,
+			const value_image_lines_dimensions odim,
+			scale_ratio scale
+		) : idim(idim), odim(odim), scale(scale) {
+			assert(idim.length() > 0);
+			assert(odim.length() > 0);
+			assert(idim.X % scale.A == 0);
+			assert(idim.Y % scale.A == 0);
+			assert(odim.X % scale.B == 0);
+			assert(odim.Y % scale.B == 0);
 			const int OUTPUT_IMAGE_SIZE = output_image_size();
 			biases.resize(OUTPUT_IMAGE_SIZE);
 			output.resize(OUTPUT_IMAGE_SIZE);
 			signal.resize(OUTPUT_IMAGE_SIZE);
 			weights.resize(OUTPUT_IMAGE_SIZE * weights_per_neuron());
+			biases_error.resize(OUTPUT_IMAGE_SIZE);
+			weights_error.resize(OUTPUT_IMAGE_SIZE * weights_per_neuron());
 			vec_fill(biases, 0.0f);
 			vec_fill(output, 0.0f);
 			vec_fill(signal, 0.0f);
+			vec_fill(weights, 0.0f);
 			vec_fill(biases_error, 0.0f);
+			vec_fill(weights_error, 0.0f);
 		}
 
 		int input_image_size() const {
-			return dim.length() * (SCALE.A * SCALE.A) / (SCALE.B * SCALE.B);
+			return idim.length();
 		}
 		int output_image_size() const {
-			return dim.length();
+			return odim.length();
 		}
 		int weights_per_neuron() const {
-			return SCALE.C * SCALE.C;
+			return scale.C * scale.C * idim.C;
 		}
 
 		// ============================================================
@@ -74,13 +100,11 @@ namespace ML::models::autoencoder {
 		// network functions
 		// ------------------------------------------------------------
 
-		struct image_bounds {
-			int x0, x1;
-			int y0, y1;
-		};
-
-		static vector<int> generate_intervals(int n_threads, int length) {
-			vector<int> intervals;
+		static vector<image_area> generate_intervals(int n_threads, int length) {
+			vector<image_area> intervals;
+			// TODO - dont do anything too fancy, just stripes in image
+			// TODO - generate less intervals than n_threads below a certain length.
+			// 		^ REMEMBER to spawn less threads in callers if less intervals were generated!
 			for(int x=0;x<=n_threads;x++) intervals.push_back((x * length) / n_threads);
 			intervals.push_back(length);
 			return intervals;
@@ -90,26 +114,71 @@ namespace ML::models::autoencoder {
 			ae_layer& layer,
 			const vector<float>& input_values,
 			vector<float>& output_values,
-			const image_bounds o_area
+			const image_area o_area
 		) {
-			// TODO - middle of image
-			// TODO - image edges
+			const value_image_lines_dimensions& idim = layer.idim;
+			const value_image_lines_dimensions& odim = layer.odim;
+			const scale_ratio& scale = layer.scale;
+			const vector<float>& biases = layer.biases;
+			vector<float>& signal = layer.signal;
+			vector<float>& output = layer.output;
+			const vector<float>& weights = layer.weights;
+			const int WEIGHTS_PER_NEURON = layer.weights_per_neuron();
 
-			// compute activations.
-			const int IMAGE_SIZE = layer.output_image_size();
-			for(int n=o_beg;n<o_end;n++) {
-				float sum = layer.biases[n];
-				const target_itv itv = layer.foreward_targets.get_interval(n);
-				for(int i=itv.beg;i<itv.end;i++) {
-					const foreward_target ft = layer.foreward_targets.targets[i];
-					sum += ft.weight * input_values[ft.neuron_index];
+			for(int oy=o_area.y0;oy<o_area.y1;oy++) {
+			for(int ox=o_area.x0;ox<o_area.x1;ox++) {
+				// get area of centered CxC square in input.
+				const int ix0 = (ox / scale.B) * scale.A + (scale.A / 2) - (scale.C / 2);
+				const int iy0 = (oy / scale.B) * scale.A + (scale.A / 2) - (scale.C / 2);
+				const image_area i_area {
+					ix0, ix0 + scale.C,
+					iy0, iy0 + scale.C,
+				};
+
+				if(i_area.is_within_image_bounds(idim)) {
+					for(int oc=0;oc<odim.C;oc++) {
+						const int o_n = odim.get_offset(ox, oy, oc);
+						float sum = biases[o_n];
+						int w = o_n * WEIGHTS_PER_NEURON;// initial weight index.
+						for(int iy=i_area.y0;iy<i_area.y1;iy++) {
+						for(int ix=i_area.x0;ix<i_area.x1;ix++) {
+						for(int ic=0;ic<idim.C;ic++) {
+							const int i_n = idim.get_offset(ix, iy, ic);
+							sum += weights[w] * input_values[i_n];
+							w++;
+						}}}
+						assert(w == ((o_n * WEIGHTS_PER_NEURON) + WEIGHTS_PER_NEURON));
+						signal[o_n] = sum;
+						output[o_n] = activation_func(sum);
+					}
+				} else {
+					for(int oc=0;oc<odim.C;oc++) {
+						const int o_n = odim.get_offset(ox, oy, oc);
+						float sum = biases[o_n];
+						int w = o_n * WEIGHTS_PER_NEURON;// initial weight index.
+						for(int iy=i_area.y0;iy<i_area.y1;iy++) {
+						for(int ix=i_area.x0;ix<i_area.x1;ix++) {
+						for(int ic=0;ic<idim.C;ic++) {
+							const int i_n = idim.get_offset(ix, iy, ic);
+							sum += weights[w] * input_values[i_n];
+							w++;
+						}}}
+						assert(w == ((o_n * WEIGHTS_PER_NEURON) + WEIGHTS_PER_NEURON));
+						signal[o_n] = sum;
+						output[o_n] = activation_func(sum);
+					}
 				}
-				layer.signal[n] = sum;
-				layer.output[n] = activation_func(sum);
-			}
+			}}
+
 			// copy output values.
-			vec_copy(output_values, layer.output, o_beg, o_end);
+			for(int oy=o_area.y0;oy<o_area.y1;oy++) {
+				const int i0 = odim.get_offset(o_area.x0, oy, 0);
+				const int i1 = odim.get_offset(o_area.x1, oy, 0);
+				vec_copy(output_values, layer.output, i0, i1);
+			}
 		}
+
+		// TODO - continue from here...
 
 		void propagate(const int n_threads, const std::vector<float>& input_values, std::vector<float>& output_values) {
 			// spawn threads.
