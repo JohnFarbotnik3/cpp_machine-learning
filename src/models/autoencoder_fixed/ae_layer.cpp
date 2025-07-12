@@ -39,6 +39,8 @@ namespace ML::models::autoencoder {
 		vector<image_itv> input_area_y;
 		vector<image_itv> output_area_x;
 		vector<image_itv> output_area_y;
+		const int WEIGHTS_PER_OUTPUT_NEURON;
+		const int WEIGHTS_PER_INPUT_NEURON;
 
 		area_table(const value_image_lines_dimensions idim, const value_image_lines_dimensions odim, const scale_ratio scale) {
 			assert(idim.length() > 0);
@@ -51,6 +53,8 @@ namespace ML::models::autoencoder {
 			// assert that input and output have same number of NxN squares.
 			assert((idim.X / scale.A) == (odim.X / scale.B));
 			assert((idim.Y / scale.A) == (odim.Y / scale.B));
+			// assert that overlapping factor is consistent.
+			assert(scale.C % scale.A);
 
 			input_area_x.resize(odim.X);
 			input_area_y.resize(odim.Y);
@@ -113,6 +117,32 @@ namespace ML::models::autoencoder {
 				itv_y.p0, itv_y.p1,
 			};
 		}
+
+		/*
+			TODO: it would be super useful if there was an easy way to
+			compute indices which relate foreward-targets to backprop-targets,
+			and vice-versa.
+
+			this would enable read-style gathering of weight-errors during backprop
+			as if I were still using backprop targets, and having both conversions would allow
+			multithreading the apply_batch_error function as well.
+
+			it may be possible to generate lookup tables for both of these,
+			and there is a lot of linear separability to be had here,
+			but this is by far some of the most complex coordinate manipulation I have done thusfar.
+		*/
+
+		// TODO
+		// get index of weight for foreward propagation.
+		//int get_foreward_weight_index(const int out_n, const int ix, const int iy, const int ic) const {}
+
+		// TODO
+		// get index of weight-error for backpropagation.
+		//int get_backprop_weight_error_index() const {}
+
+		// TODO
+		//int get_related_fw_target_index() const {}
+		//int get_realted_bp_target_index() const {}
 	};
 
 	struct ae_layer {
@@ -136,9 +166,9 @@ namespace ML::models::autoencoder {
 			biases.resize(OUTPUT_IMAGE_SIZE);
 			output.resize(OUTPUT_IMAGE_SIZE);
 			signal.resize(OUTPUT_IMAGE_SIZE);
-			weights.resize(OUTPUT_IMAGE_SIZE * weights_per_neuron());
+			weights.resize(OUTPUT_IMAGE_SIZE * weights_per_output_neuron());
 			biases_error.resize(OUTPUT_IMAGE_SIZE);
-			weights_error.resize(OUTPUT_IMAGE_SIZE * weights_per_neuron());
+			weights_error.resize(OUTPUT_IMAGE_SIZE * weights_per_output_neuron());
 			vec_fill(biases, 0.0f);
 			vec_fill(output, 0.0f);
 			vec_fill(signal, 0.0f);
@@ -153,9 +183,12 @@ namespace ML::models::autoencoder {
 		int output_image_size() const {
 			return odim.length();
 		}
-		int weights_per_neuron() const {
+		int weights_per_output_neuron() const {
 			return scale.C * scale.C * idim.C;
 		}
+		int weights_per_input_neuron() const {
+			return weights_per_output_neuron() * (scale.B * scale.B) / (scale.A * scale.A);
+		};
 
 		// ============================================================
 		// activation functions.
@@ -204,7 +237,7 @@ namespace ML::models::autoencoder {
 			vector<float>& signal = layer.signal;
 			vector<float>& output = layer.output;
 			const vector<float>& weights = layer.weights;
-			const int WEIGHTS_PER_NEURON = layer.weights_per_neuron();
+			const int WEIGHTS_PER_NEURON = layer.weights_per_output_neuron();
 
 			for(int oy=o_area.y0;oy<o_area.y1;oy++) {
 			for(int ox=o_area.x0;ox<o_area.x1;ox++) {
@@ -276,7 +309,7 @@ namespace ML::models::autoencoder {
 			const value_image_lines_dimensions& idim = layer.idim;
 			const value_image_lines_dimensions& odim = layer.odim;
 			const scale_ratio& scale = layer.scale;
-			const int WEIGHTS_PER_NEURON = layer.weights_per_neuron();
+			const int WEIGHTS_PER_NEURON = layer.weights_per_output_neuron();
 			const int W_STRIDE_X = idim.C;
 			const int W_STRIDE_Y = idim.C * scale.C;
 			const float mult = 1.0f / WEIGHTS_PER_NEURON;
@@ -304,6 +337,8 @@ namespace ML::models::autoencoder {
 
 							const float error_term = signal_error_terms[out_n];
 							input_error_sum        += error_term * mult * layer.weights[w];
+							// WARNING: this is a write-style operation, and is thus not thread safe.
+							// TODO: find a way to fix this.
 							layer.weights_error[w] += error_term * mult * input_value[in_n];
 						}
 					}}
@@ -312,13 +347,7 @@ namespace ML::models::autoencoder {
 			}}
 		}
 
-		// TODO - continue from here...
-		void back_propagate(
-			const int n_threads,
-			vector<float>& input_error,
-			const vector<float>& input_value,
-			const vector<float>& output_error
-		) {
+		void back_propagate(const int n_threads, vector<float>& input_error, const vector<float>& input_value, const vector<float>& output_error) {
 			// assertions.
 			const int IMAGE_SIZE_I = input_image_size();
 			const int IMAGE_SIZE_O = output_image_size();
@@ -334,7 +363,7 @@ namespace ML::models::autoencoder {
 			//timepoint t0 = timepoint::now();
 			vector<float> signal_error_terms(IMAGE_SIZE_O);
 			{
-				vector<int> intervals = generate_intervals(n_threads, IMAGE_SIZE_O);
+				vector<image_area> intervals = generate_intervals(n_threads, odim);
 				vector<std::thread> threads;
 				for(int x=0;x<n_threads;x++) {
 					threads.push_back(std::thread(
@@ -342,8 +371,7 @@ namespace ML::models::autoencoder {
 						std::ref(*this),
 						std::ref(signal_error_terms),
 						std::ref(output_error),
-						intervals[x],
-						intervals[x+1]
+						intervals[x]
 					));
 				}
 				for(int x=0;x<n_threads;x++) threads[x].join();
@@ -352,7 +380,7 @@ namespace ML::models::autoencoder {
 			// back propagate error to input and adjust weights.
 			//timepoint t1 = timepoint::now();
 			{
-				vector<int> intervals = generate_intervals(n_threads, IMAGE_SIZE_I);
+				vector<image_area> intervals = generate_intervals(n_threads, idim);
 				vector<std::thread> threads;
 				for(int x=0;x<n_threads;x++) {
 					threads.push_back(std::thread(
@@ -361,8 +389,7 @@ namespace ML::models::autoencoder {
 						std::ref(input_error),
 						std::ref(input_value),
 						std::ref(signal_error_terms),
-						intervals[x],
-						intervals[x+1]
+						intervals[x]
 					));
 				}
 				for(int x=0;x<n_threads;x++) threads[x].join();
@@ -384,12 +411,10 @@ namespace ML::models::autoencoder {
 			//printf("dt:\t%li\t%li\t%li\n", t1.delta_us(t0), t2.delta_us(t1), t3.delta_us(t2));
 		}
 
+		// TODO - continue from here...
 		void clear_batch_error() {
-			// assertions.
 			assert(biases_error.size() == biases.size());
-			assert(weights_error.size() == foreward_targets.targets.size());
-			assert(weights_error.size() == backprop_targets.targets.size());
-
+			assert(weights_error.size() == weights.size());
 			vec_fill(biases_error, 0.0f);
 			vec_fill(weights_error, 0.0f);
 		}
