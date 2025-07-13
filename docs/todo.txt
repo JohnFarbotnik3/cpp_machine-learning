@@ -105,7 +105,6 @@ as it may improve performance by reducing allocations.
 - there is room to introduce SIMD.
 
 
-
 > Gaussian splatting based image compression.
 * Gaussian splatting might be able to recreate images with FAR fewer parameters than an autoencoder.
 ^ it may make sense to break images into sections whose output contents dont spill over (output clipping).
@@ -160,13 +159,22 @@ same threads-over-intervals code over and over again.
 ...
 
 
+> multithreaded fixed-autoencoder.
+* a semi-general solution to multithreading an autoencoder would be to split each image and each layer into subimages.
+^ these subimages would benefit from having padding pixels (for both input and output)
+which contain data from adjacent subimages, or are initialized to 0 if out of bounds
+^ padding would allow getting rid of some bounds checks, as well as pre-computing tables
+of offsets for input area (if thats even needed - it probably wont be with the algorithm simplifications).
+^ this would get some of the benefits of tiled images too, since the scanlines would be shorter.
+^ write-style operations would be less of a concern.
+^ create a padded_value_image type for this. having a good get_offset(x,y,c) function would help a lot.
+- there should be some minimum subimage size (ex. 64*64 or 128*128),
+because otherwise thread-spawning and padding-exchange would add too much overhead.
+
+
+
 > debug autoencoder.
-- check if lowering ReLU leakage speeds up the slow half of the learning process.
-	^ with lower leakage, try higher learning rate?
 - add config file parsing (newline delimited KEY=VALUE pairs).
-- re-add middle layers to fully prove autoencoder effectiveness.
-- figure out why model is performing well and then explodes without warning
-far into the training process (when error values are very small).
 * work on model ergonomics first:
 	- config files: commandline parameters in text file.
 	- model save/load: launch-config, current-settings, model-parameters, training-logs.
@@ -182,14 +190,13 @@ far into the training process (when error values are very small).
 	and add commandline arguments for model-parameter distributions.
 ** clamp output image values when generating image files / previews.
 x long run with 30 images crashed at z=~1000/2000, see logs.
-** remove assertion in backprop normalization that insum & outsum > 0,
+^ remove assertion in backprop normalization that insum & outsum > 0,
 and replace with an if-condition + a warning printed to console.
-** TODO: write general push_layer function, which allows
-both scaling and AxA_BxB mixing at the same time.
 ** try centering range of image values on 0.0 (currently [0.0, 1.0] which is centered on 0.5).
 ** generate sample images and output to specified temp directory, then use those for training instead
 of using caching.
 ...
+
 
 
 > add to journal:

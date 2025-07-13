@@ -1,9 +1,12 @@
 
+#include <chrono>
+#include <climits>
+#include <thread>
 #include <vector>
 #include "src/utils/vector_util.cpp"
 #include "src/image/value_image_lines.cpp"
 
-namespace ML::models::autoencoder {
+namespace ML::models::autoencoder_fixed {
 	using std::vector;
 	using namespace utils::vector_util;
 	using namespace ML::image;
@@ -17,7 +20,7 @@ namespace ML::models::autoencoder {
 	struct scale_ratio {
 		int A;// input  - AxA square.
 		int B;// output - BxB square.
-		int C;// input area - a CxC square centered on scaled position in previous layer.
+		int M;// input area - a MxM square centered on scaled position in previous layer.
 	};
 
 	struct image_area {
@@ -35,14 +38,19 @@ namespace ML::models::autoencoder {
 	struct image_itv { int p0, p1; };
 
 	struct area_table {
+		value_image_lines_dimensions idim;
+		value_image_lines_dimensions odim;
+		scale_ratio scale;
 		vector<image_itv> input_area_x;
 		vector<image_itv> input_area_y;
 		vector<image_itv> output_area_x;
 		vector<image_itv> output_area_y;
-		const int WEIGHTS_PER_OUTPUT_NEURON;
-		const int WEIGHTS_PER_INPUT_NEURON;
+		vector<int> related_fw_target_offsets;
+		vector<int> related_bp_target_offsets;
+		int WEIGHTS_PER_OUTPUT_NEURON;
+		int WEIGHTS_PER_INPUT_NEURON;
 
-		area_table(const value_image_lines_dimensions idim, const value_image_lines_dimensions odim, const scale_ratio scale) {
+		area_table(const value_image_lines_dimensions idim, const value_image_lines_dimensions odim, const scale_ratio scale) : idim(idim), odim(odim), scale(scale) {
 			assert(idim.length() > 0);
 			assert(odim.length() > 0);
 			// assert that input/output are tiled cleanly by NxN squares.
@@ -54,50 +62,94 @@ namespace ML::models::autoencoder {
 			assert((idim.X / scale.A) == (odim.X / scale.B));
 			assert((idim.Y / scale.A) == (odim.Y / scale.B));
 			// assert that overlapping factor is consistent.
-			assert(scale.C % scale.A);
+			assert(scale.M > 0);
+			assert(scale.M % scale.A == 0);
 
+			init_input_areas();
+			init_output_areas();
+		}
+
+	private:
+		// compute unclamped input areas of output neurons.
+		void init_input_areas() {
 			input_area_x.resize(odim.X);
 			input_area_y.resize(odim.Y);
-			output_area_x.resize(idim.X);
-			output_area_y.resize(idim.Y);
-
-			// compute input areas of output neurons.
 			for(int ox=0;ox<odim.X;ox++) {
-				const int ix0 = (ox / scale.B) * scale.A + (scale.A / 2) - (scale.C / 2);
-				const int ix1 = ix0 + scale.C;
+				const int ix0 = (ox / scale.B) * scale.A + (scale.A / 2) - (scale.M / 2);
+				const int ix1 = ix0 + scale.M;
 				input_area_x[ox] = image_itv{ ix0, ix1 };
 			}
 			for(int oy=0;oy<odim.Y;oy++) {
-				const int iy0 = (oy / scale.B) * scale.A + (scale.A / 2) - (scale.C / 2);
-				const int iy1 = iy0 + scale.C;
+				const int iy0 = (oy / scale.B) * scale.A + (scale.A / 2) - (scale.M / 2);
+				const int iy1 = iy0 + scale.M;
 				input_area_y[oy] = image_itv{ iy0, iy1 };
-			}
-
-			// determine output areas of input neurons (using input areas).
-			const int MIN_INT = 0;
-			const int MAX_INT = std::max(odim.X, odim.Y);
-			for(int p=0;p<output_area_x.size();p++) output_area_x[p] = image_itv{ MAX_INT, MIN_INT };
-			for(int p=0;p<output_area_y.size();p++) output_area_y[p] = image_itv{ MAX_INT, MIN_INT };
-			for(int ox=0;ox<odim.X;ox++) {
-				const image_itv itv_i = input_area_x[ox];
-				for(int p=itv_i.p0;p<itv_i.p1;p++) {
-					if(p < 0 || p > idim.X) continue;
-					image_itv& itv_o = output_area_x[p];
-					itv_o.p0 = std::min(itv_o.p0, ox);
-					itv_o.p1 = std::max(itv_o.p1, ox);
-				}
-			}
-			for(int oy=0;oy<odim.Y;oy++) {
-				const image_itv itv_i = input_area_y[oy];
-				for(int p=itv_i.p0;p<itv_i.p1;p++) {
-					if(p < 0 || p > idim.Y) continue;
-					image_itv& itv_o = output_area_y[p];
-					itv_o.p0 = std::min(itv_o.p0, oy);
-					itv_o.p1 = std::max(itv_o.p1, oy);
-				}
 			}
 		}
 
+		// compute unclamped output areas of input neurons.
+		void init_output_areas() {
+			const int A = scale.A;
+			const int B = scale.B;
+			const int M = scale.M;
+			output_area_x.resize(idim.X);
+			output_area_y.resize(idim.Y);
+			for(int p=0;p<output_area_x.size();p++) output_area_x[p] = image_itv{ INT_MAX, INT_MIN };
+			for(int p=0;p<output_area_y.size();p++) output_area_y[p] = image_itv{ INT_MAX, INT_MIN };
+
+			// WARNING: negative numbers round down i.e. AWAY from 0.
+			// the weird if-statements after the ix0 are to compensate for this.
+			{
+			int ox = 0;
+			while(true) {
+				int ix0 = (ox / B) * A + (A/2) - (M/2);
+				if(ox < 0 && ox % B != 0) ix0 -= A;
+				int ix1 = ix0 + M;
+				if(ix1 < 0) break;
+				ox--;
+			}
+			while(true) {
+				int ix0 = (ox / B) * A + (A/2) - (M/2);
+				if(ox < 0 && ox % B != 0) ix0 -= A;
+				int ix1 = ix0 + M;
+				if(ix0 > idim.X) break;
+				for(int p=ix0;p<ix1;p++) {
+					if(0 <= p && p < idim.X) {
+						image_itv& itv = output_area_x[p];
+						itv.p0 = std::min(itv.p0, ox);
+						itv.p1 = std::max(itv.p1, ox+1);
+					}
+				}
+				ox++;
+			}
+			}
+
+			{
+			int oy = 0;
+			while(true) {
+				int iy0 = (oy / B) * A + (A/2) - (M/2);
+				if(oy < 0 && oy % B != 0) iy0 -= A;
+				int iy1 = iy0 + M;
+				if(iy1 < 0) break;
+				oy--;
+			}
+			while(true) {
+				int iy0 = (oy / B) * A + (A/2) - (M/2);
+				if(oy < 0 && oy % B != 0) iy0 -= A;
+				int iy1 = iy0 + M;
+				if(iy0 > idim.Y) break;
+				for(int p=iy0;p<iy1;p++) {
+					if(0 <= p && p < idim.Y) {
+						image_itv& itv = output_area_y[p];
+						itv.p0 = std::min(itv.p0, oy);
+						itv.p1 = std::max(itv.p1, oy+1);
+					}
+				}
+				oy++;
+			}
+			}
+		}
+
+	public:
 		// get the (unclamped) area of input-neurons this output-neuron reads from.
 		image_area get_input_area(int ox, int oy) const {
 			const image_itv itv_x = input_area_x[ox];
@@ -108,7 +160,7 @@ namespace ML::models::autoencoder {
 			};
 		}
 
-		// get the area of output-neurons read from this input-neuron.
+		// get the (unclamped) area of output-neurons read from this input-neuron.
 		image_area get_output_area(int ix, int iy) const {
 			const image_itv itv_x = output_area_x[ix];
 			const image_itv itv_y = output_area_y[iy];
@@ -117,45 +169,19 @@ namespace ML::models::autoencoder {
 				itv_y.p0, itv_y.p1,
 			};
 		}
-
-		/*
-			TODO: it would be super useful if there was an easy way to
-			compute indices which relate foreward-targets to backprop-targets,
-			and vice-versa.
-
-			this would enable read-style gathering of weight-errors during backprop
-			as if I were still using backprop targets, and having both conversions would allow
-			multithreading the apply_batch_error function as well.
-
-			it may be possible to generate lookup tables for both of these,
-			and there is a lot of linear separability to be had here,
-			but this is by far some of the most complex coordinate manipulation I have done thusfar.
-		*/
-
-		// TODO
-		// get index of weight for foreward propagation.
-		//int get_foreward_weight_index(const int out_n, const int ix, const int iy, const int ic) const {}
-
-		// TODO
-		// get index of weight-error for backpropagation.
-		//int get_backprop_weight_error_index() const {}
-
-		// TODO
-		//int get_related_fw_target_index() const {}
-		//int get_realted_bp_target_index() const {}
 	};
 
 	struct ae_layer {
 		vector<float> biases;
 		vector<float> output;// image of output values - used for backprop.
 		vector<float> signal;// image of signal values - used for backprop.
-		vector<float> weights;
+		vector<float> weights;// weights.
 		vector<float> biases_error;// accumulated error in biases during minibatch.
-		vector<float> weights_error;// accumulated error in weights during minibatch.
-		const value_image_lines_dimensions idim;// input image dimensions.
-		const value_image_lines_dimensions odim;// output image dimensions.
-		const scale_ratio scale;
-		const area_table table;
+		vector<float> weights_error;// accumulated error in weights during minibatch. NOTE: errors are stored in input-weight order.
+		value_image_lines_dimensions idim;// input image dimensions.
+		value_image_lines_dimensions odim;// output image dimensions.
+		scale_ratio scale;
+		area_table table;
 
 		ae_layer(
 			const value_image_lines_dimensions idim,
@@ -184,10 +210,10 @@ namespace ML::models::autoencoder {
 			return odim.length();
 		}
 		int weights_per_output_neuron() const {
-			return scale.C * scale.C * idim.C;
+			return scale.M * scale.M * idim.C;
 		}
 		int weights_per_input_neuron() const {
-			return weights_per_output_neuron() * (scale.B * scale.B) / (scale.A * scale.A);
+			return weights_per_output_neuron() * odim.length() / idim.length();
 		};
 
 		// ============================================================
@@ -237,44 +263,25 @@ namespace ML::models::autoencoder {
 			vector<float>& signal = layer.signal;
 			vector<float>& output = layer.output;
 			const vector<float>& weights = layer.weights;
-			const int WEIGHTS_PER_NEURON = layer.weights_per_output_neuron();
+			const int WEIGHTS_PER_OUTPUT_NEURON = layer.weights_per_output_neuron();
 
 			for(int oy=o_area.y0;oy<o_area.y1;oy++) {
 			for(int ox=o_area.x0;ox<o_area.x1;ox++) {
 				const image_area i_area = layer.table.get_input_area(ox, oy);
-
-				if(i_area.is_within_image_bounds(idim)) {
-					for(int oc=0;oc<odim.C;oc++) {
-						const int out_n = odim.get_offset(ox, oy, oc);
-						float sum = biases[out_n];
-						int w = out_n * WEIGHTS_PER_NEURON;// initial weight index.
-						for(int iy=i_area.y0;iy<i_area.y1;iy++) {
-						for(int ix=i_area.x0;ix<i_area.x1;ix++) {
-						for(int ic=0;ic<idim.C;ic++) {
-							const int in_n = idim.get_offset(ix, iy, ic);
-							sum += weights[w] * input_values[in_n];
-							w++;
-						}}}
-						assert(w == ((out_n * WEIGHTS_PER_NEURON) + WEIGHTS_PER_NEURON));
-						signal[out_n] = sum;
-						output[out_n] = activation_func(sum);
-					}
-				} else {
-					for(int oc=0;oc<odim.C;oc++) {
-						const int o_n = odim.get_offset(ox, oy, oc);
-						float sum = biases[o_n];
-						int w = o_n * WEIGHTS_PER_NEURON;// initial weight index.
-						for(int iy=i_area.y0;iy<i_area.y1;iy++) {
-						for(int ix=i_area.x0;ix<i_area.x1;ix++) {
-						for(int ic=0;ic<idim.C;ic++) {
-							const int i_n = idim.get_offset(ix, iy, ic);
-							sum += weights[w] * input_values[i_n];
-							w++;
-						}}}
-						assert(w == ((o_n * WEIGHTS_PER_NEURON) + WEIGHTS_PER_NEURON));
-						signal[o_n] = sum;
-						output[o_n] = activation_func(sum);
-					}
+				for(int oc=0;oc<odim.C;oc++) {
+					const int out_n = odim.get_offset(ox, oy, oc);
+					float sum = biases[out_n];
+					int w = out_n * WEIGHTS_PER_OUTPUT_NEURON;// initial weight index.
+					for(int iy=i_area.y0;iy<i_area.y1;iy++) {
+					for(int ix=i_area.x0;ix<i_area.x1;ix++) {
+					if(!idim.is_within_bounds(ix, iy)) { w+=idim.C; continue; }
+					for(int ic=0;ic<idim.C;ic++) {
+						const int in_n = idim.get_offset(ix, iy, ic);
+						sum += weights[w] * input_values[in_n];
+						w++;
+					}}}
+					signal[out_n] = sum;
+					output[out_n] = activation_func(sum);
 				}
 			}}
 
@@ -309,42 +316,42 @@ namespace ML::models::autoencoder {
 			const value_image_lines_dimensions& idim = layer.idim;
 			const value_image_lines_dimensions& odim = layer.odim;
 			const scale_ratio& scale = layer.scale;
-			const int WEIGHTS_PER_NEURON = layer.weights_per_output_neuron();
+			const area_table& table = layer.table;
+			const int WEIGHTS_PER_OUTPUT_NEURON = layer.weights_per_output_neuron();
+			const int WEIGHTS_PER_INPUT_NEURON = layer.weights_per_input_neuron();
 			const int W_STRIDE_X = idim.C;
-			const int W_STRIDE_Y = idim.C * scale.C;
-			const float mult = 1.0f / WEIGHTS_PER_NEURON;
+			const int W_STRIDE_Y = idim.C * scale.M;
+			const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);// TODO - test if this helps or hinders deep autoencoders.
 
+			// for each input neuron in input-area...
 			for(int iy=i_area.y0;iy<i_area.y1;iy++) {
-			for(int ix=i_area.x0;ix<i_area.x1;ix++) {
-				// get area of output-neurons that read from this input-neuron.
-				const image_area o_area = layer.table.get_output_area(ix, iy);
-
-				// for each neuron in input: gather input-error and weight-error from output-neurons.
-				for(int ic=0;ic<idim.C;ic++) {
-					const int in_n = idim.get_offset(ix, iy, ic);
-					float input_error_sum = 0;
-					for(int ox=o_area.x0;ox<o_area.x1;ox++) {
-					for(int oy=o_area.y0;oy<o_area.y1;oy++) {
-						const image_area r_area = layer.table.get_input_area(ox, oy);
-						const int dx = ix - r_area.x0;
-						const int dy = iy - r_area.y0;
-						const int wofs = (dx * W_STRIDE_X) + (dy * W_STRIDE_Y) + ic;
-
-						for(int oc=0;oc<odim.C;oc++) {
-							// get the weight-index corrosponding to this input-neuron.
-							const int out_n = odim.get_offset(ox, oy, oc);
-							const int w = out_n * WEIGHTS_PER_NEURON + wofs;
-
-							const float error_term = signal_error_terms[out_n];
-							input_error_sum        += error_term * mult * layer.weights[w];
-							// WARNING: this is a write-style operation, and is thus not thread safe.
-							// TODO: find a way to fix this.
-							layer.weights_error[w] += error_term * mult * input_value[in_n];
-						}
-					}}
-					input_error[in_n] = input_error_sum;
+			for(int ix=i_area.x0;ix<i_area.x1;ix++) { const image_area o_area = table.get_output_area(ix, iy);
+			for(int ic=0;ic<idim.C;ic++) {
+				const int in_n = idim.get_offset(ix, iy, ic);
+				int e = in_n * WEIGHTS_PER_INPUT_NEURON;// weight-error index.
+				float input_error_sum = 0;
+				// for each output neuron that may read from it...
+				for(int oy=o_area.y0;oy<o_area.y1;oy++) {
+				for(int ox=o_area.x0;ox<o_area.x1;ox++) {
+				if(odim.is_within_bounds(ox, oy)) {
+					const image_area r_area = table.get_input_area(ox, oy);
+					const int wofs_y = (iy - r_area.y0) * W_STRIDE_Y;
+					const int wofs_x = (ix - r_area.x0) * W_STRIDE_X;
+				for(int oc=0;oc<odim.C;oc++) {
+					// compute the weight index that would be used to read this input-neuron.
+					const int out_n = odim.get_offset(ox, oy, oc);
+					const int w = (out_n * WEIGHTS_PER_OUTPUT_NEURON) + wofs_x + wofs_y + ic;
+					// accumulate error.
+					const float error_term = signal_error_terms[out_n];
+					input_error_sum        += error_term * mult * layer.weights[w];
+					layer.weights_error[e] += error_term * mult * input_value[in_n];
+					e++;
+				}} else {
+					e += odim.C;
 				}
-			}}
+				}}
+				input_error[in_n] = input_error_sum;
+			}}}
 		}
 
 		void back_propagate(const int n_threads, vector<float>& input_error, const vector<float>& input_value, const vector<float>& output_error) {
@@ -401,17 +408,16 @@ namespace ML::models::autoencoder {
 			const float in_sum  = vec_sum_abs_mt(input_error, 0, input_error.size(), n_threads);
 			const float out_sum = vec_sum_abs_mt(output_error, 0, output_error.size(), n_threads);
 			float mult = (out_sum / in_sum) * (float(IMAGE_SIZE_I) / float(IMAGE_SIZE_O));
+			//printf("error: isum=%f, osum=%f\n", in_sum, out_sum);
 			assert(out_sum > 0.0f);
 			assert(in_sum > 0.0f);
 			vec_mult_mt(input_error, mult, 0, input_error.size(), n_threads);
-			//printf("error: z=%i, isum=%f, osum=%f\n", z, in_sum, out_sum);
 
 			// TEST - print time taken for each part of function.
 			//timepoint t3 = timepoint::now();
 			//printf("dt:\t%li\t%li\t%li\n", t1.delta_us(t0), t2.delta_us(t1), t3.delta_us(t2));
 		}
 
-		// TODO - continue from here...
 		void clear_batch_error() {
 			assert(biases_error.size() == biases.size());
 			assert(weights_error.size() == weights.size());
@@ -420,29 +426,67 @@ namespace ML::models::autoencoder {
 		}
 
 		static void apply_batch_error_biases(ae_layer& layer, const int beg, const int end, const float adjustment_rate) {
-			const float BIAS_LIMIT = 10.0f;
+			const float BIAS_LIMIT = 100.0f;
 			const float BIAS_ADJUSTMENT_LIMIT = 0.5f;
 			for(int n=beg;n<end;n++) {
 				const float adjustment = std::clamp(layer.biases_error[n] * adjustment_rate, -BIAS_ADJUSTMENT_LIMIT, +BIAS_ADJUSTMENT_LIMIT);
 				layer.biases[n] = std::clamp(layer.biases[n] + adjustment, -BIAS_LIMIT, +BIAS_LIMIT);
 			}
 		}
-		static void apply_batch_error_weights(ae_layer& layer, const int beg, const int end, const float adjustment_rate) {
+		static void apply_batch_error_weights(ae_layer& layer, const image_area i_area, const float adjustment_rate) {
 			const float WEIGHT_LIMIT = 100.0f;
 			const float WEIGHT_ADJUSTMENT_LIMIT = 0.5f;
+			/*
 			for(int x=beg;x<end;x++) {
-				backprop_target& bt = layer.backprop_targets.targets[x];
-				foreward_target& ft = layer.foreward_targets.targets[bt.target_index];
 				const float adjustment = std::clamp(layer.weights_error[x] * adjustment_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
-				bt.weight = std::clamp(bt.weight + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
-				ft.weight = bt.weight;
+				layer.weights[x] = std::clamp(layer.weights[x] + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
 			}
+			*/
+
+			// NOTE: this algorithm is copy-pasted from backprop, because inverting from
+			// backprop indices to foreward indices is quite hard, and not really worth the effort.
+			// WARNING: this algorithm is write-style and not thread-safe.
+			const value_image_lines_dimensions& idim = layer.idim;
+			const value_image_lines_dimensions& odim = layer.odim;
+			const scale_ratio& scale = layer.scale;
+			const area_table& table = layer.table;
+			const int WEIGHTS_PER_OUTPUT_NEURON = layer.weights_per_output_neuron();
+			const int WEIGHTS_PER_INPUT_NEURON = layer.weights_per_input_neuron();
+			const int W_STRIDE_X = idim.C;
+			const int W_STRIDE_Y = idim.C * scale.M;
+
+			// for each input neuron in input-area...
+			for(int iy=i_area.y0;iy<i_area.y1;iy++) {
+			for(int ix=i_area.x0;ix<i_area.x1;ix++) { const image_area o_area = table.get_output_area(ix, iy);
+			for(int ic=0;ic<idim.C;ic++) {
+				const int in_n = idim.get_offset(ix, iy, ic);
+				int e = in_n * WEIGHTS_PER_INPUT_NEURON;// weight-error index.
+				// for each output neuron that may read from it...
+				for(int oy=o_area.y0;oy<o_area.y1;oy++) {
+				for(int ox=o_area.x0;ox<o_area.x1;ox++) {
+				if(odim.is_within_bounds(ox, oy)) {
+					const image_area r_area = table.get_input_area(ox, oy);
+					const int wofs_y = (iy - r_area.y0) * W_STRIDE_Y;
+					const int wofs_x = (ix - r_area.x0) * W_STRIDE_X;
+				for(int oc=0;oc<odim.C;oc++) {
+					// compute the weight index that would be used to read this input-neuron.
+					const int out_n = odim.get_offset(ox, oy, oc);
+					const int w = (out_n * WEIGHTS_PER_OUTPUT_NEURON) + wofs_x + wofs_y + ic;
+					// accumulate error.
+					const float adjustment = std::clamp(layer.weights_error[e] * adjustment_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
+					layer.weights[w] = std::clamp(layer.weights[w] + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
+					e++;
+				}} else {
+					e += odim.C;
+				}
+				}}
+				assert(e == (in_n * WEIGHTS_PER_INPUT_NEURON + WEIGHTS_PER_INPUT_NEURON));
+			}}}
 		}
 		void apply_batch_error(const int n_threads, const int batch_size, const float learning_rate_b, const float learning_rate_w) {
 			// assertions.
 			assert(biases_error.size() == biases.size());
-			assert(weights_error.size() == foreward_targets.targets.size());
-			assert(weights_error.size() == backprop_targets.targets.size());
+			assert(weights_error.size() == weights.size());
 
 			// adjust biases.
 			{
@@ -460,12 +504,11 @@ namespace ML::models::autoencoder {
 			// adjust weights.
 			{
 				const float adjustment_rate = learning_rate_w / batch_size;
+				vector<image_area> intervals = generate_intervals(n_threads, idim);
 				vector<std::thread> threads;
-				const int len = backprop_targets.targets.size();
+				const int len = weights.size();
 				for(int x=0;x<n_threads;x++) {
-					const int x0 = ((x+0) * len) / n_threads;
-					const int x1 = ((x+1) * len) / n_threads;
-					threads.push_back(std::thread(apply_batch_error_weights, std::ref(*this), x0, x1, adjustment_rate));
+					threads.push_back(std::thread(apply_batch_error_weights, std::ref(*this), intervals[x], adjustment_rate));
 				}
 				for(int x=0;x<n_threads;x++) threads[x].join();
 			}

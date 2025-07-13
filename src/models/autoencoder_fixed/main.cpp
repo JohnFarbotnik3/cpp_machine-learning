@@ -12,14 +12,14 @@
 
 /*
 debug build:
-g++ -std=c++23 -O2 -fsanitize=address -o "./src/modes/autoencoder_fixed/main.elf" "./src/modes/autoencoder_fixed/main.cpp"
+g++ -std=c++23 -O2 -fsanitize=address -o "./src/models/autoencoder_fixed/main.elf" "./src/models/autoencoder_fixed/main.cpp"
 
 build:
-g++ -std=c++23 -O2 -I "./" -o "./src/modes/autoencoder_fixed/main.elf" "./src/modes/autoencoder_fixed/main.cpp"
-g++ -std=c++23 -O2 -I "./" -march=native -o "./src/modes/autoencoder_fixed/main.elf" "./src/modes/autoencoder_fixed/main.cpp"
+g++ -std=c++23 -O2 -I "./" -o "./src/models/autoencoder_fixed/main.elf" "./src/models/autoencoder_fixed/main.cpp"
+g++ -std=c++23 -O2 -I "./" -march=native -o "./src/models/autoencoder_fixed/main.elf" "./src/models/autoencoder_fixed/main.cpp"
 
 run:
-./src/modes/autoencoder_fixed/main.elf \
+./src/models/autoencoder_fixed/main.elf \
 -m ./data/models \
 -i ./data/images/images_02 \
 -o ./data/output/images_02 \
@@ -49,8 +49,9 @@ using std::string;
 using std::vector;
 using timepoint = ML::stats::timepoint;
 namespace fs = std::filesystem;
-using model_t = ML::models::autoencoder::ae_model;
-using model_image_t = ML::image::value_image_tiles<float>;
+using model_t = ML::models::autoencoder_fixed::ae_model;
+using model_image_t = ML::image::value_image_lines<float>;
+using image_dim_t = ML::image::value_image_lines_dimensions;
 
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
@@ -117,10 +118,7 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 	int X = model.input_dimensions.X;
 	int Y = model.input_dimensions.Y;
 	int C = model.input_dimensions.C;
-	int TX = model.input_dimensions.TX;
-	int TY = model.input_dimensions.TY;
-	int TC = model.input_dimensions.TC;
-	model_image_t image_input_img(X, Y, C, TX, TY, TC);
+	model_image_t image_input_img(X, Y, C);
 	const int IMAGE_SIZE = image_input_img.data.size();
 	vector<float> image_input (IMAGE_SIZE);
 	vector<float> image_output(IMAGE_SIZE);
@@ -173,7 +171,6 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 			t1 = timepoint::now();
 			settings.stats.push_value("dt error image", t1.delta_us(t0));
 			settings.stats.push_value("avg error", avg_error);
-			// TODO TEST
 			printf("image: z=%i, avg_error=%f, path=%s\n", z, avg_error, minibatch[z].path().c_str());
 
 			// backpropagate.
@@ -267,8 +264,8 @@ void print_model_parameters(model_t& model) {
 		int len = snprintf(buf, 64, "layer %i", x);
 		string name = string(buf, len);
 		const auto& layer = model.layers[x];
-		weights.resize(layer.foreward_targets.targets.size());
-		for(int x=0;x<weights.size();x++) weights[x] = layer.foreward_targets.targets[x].weight;
+		weights.resize(layer.weights.size());
+		for(int x=0;x<weights.size();x++) weights[x] = layer.weights[x];
 		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, SUM_COLUMN_WIDTH, weights);
 	}
 }
@@ -312,7 +309,7 @@ int main(const int argc, const char** argv) {
 
 	// create and initialize model.
 	printf("initializing model.\n");
-	ML::models::autoencoder::value_image_tiles_dimensions input_dimensions(input_w, input_h, input_c, 4, 4, input_c);
+	image_dim_t input_dimensions(input_w, input_h, input_c);
 	//ML::models::autoencoder::image_dimensions input_dimensions(input_w, input_h, input_c, input_w/2, input_h/2, input_c);// TEST
 	model_t model(input_dimensions);
 	model.init_model_parameters(settings.seed, 0.0f, 0.1f, 0.0f, 1.0f);
@@ -380,11 +377,8 @@ int main(const int argc, const char** argv) {
 	int X = model.input_dimensions.X;
 	int Y = model.input_dimensions.Y;
 	int C = model.input_dimensions.C;
-	int TX = model.input_dimensions.TX;
-	int TY = model.input_dimensions.TY;
-	int TC = model.input_dimensions.TC;
-	ML::image::value_image_tiles<float> image_input (X, Y, C, TX, TY, TC);
-	ML::image::value_image_tiles<float> image_output(X, Y, C, TX, TY, TC);
+	model_image_t image_input (X, Y, C);
+	model_image_t image_output(X, Y, C);
 	for(const fs::directory_entry entry : settings.image_entries) {
 		// load image.
 		ML::image::file_image loaded_image = ML::image::load_file_image(entry.path().string(), C);

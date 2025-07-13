@@ -120,12 +120,12 @@ namespace ML::models::autoencoder {
 			push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 12, ch, true); idim = odim;
 			push_layer_mix_AxA_to_1x1(idim, 3, false);
 
-			assert(odim.X == idim.X);
-			assert(odim.Y == idim.Y);
-			assert(odim.C == idim.C);
-			assert(odim.TX == idim.TX);
-			assert(odim.TY == idim.TY);
-			assert(odim.TC == idim.TC);
+			assert(odim.X == input_dimensions.X);
+			assert(odim.Y == input_dimensions.Y);
+			assert(odim.C == input_dimensions.C);
+			assert(odim.TX == input_dimensions.TX);
+			assert(odim.TY == input_dimensions.TY);
+			assert(odim.TC == input_dimensions.TC);
 		}
 
 	public:

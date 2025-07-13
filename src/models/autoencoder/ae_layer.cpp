@@ -133,6 +133,7 @@ namespace ML::models::autoencoder {
 					const float error_term = signal_error_terms[out_n];
 					const float num_inputs = layer.foreward_targets.offsets[out_n+1] - layer.foreward_targets.offsets[out_n];
 					const float mult = 1.0f / num_inputs;
+					// TODO - test using "mult=sqrtf(1.0f / num_inputs);" instead.
 					input_error_sum        += error_term * mult * bt.weight;
 					layer.weights_error[x] += error_term * mult * input_value[n];
 				}

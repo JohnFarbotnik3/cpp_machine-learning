@@ -8,92 +8,30 @@
 #include "src/utils/vector_util.cpp"
 #include "./ae_layer.cpp"
 
-namespace ML::models::autoencoder {
+namespace ML::models::autoencoder_fixed {
 	using std::vector;
 	using namespace ML::image;
 	using namespace utils::vector_util;
 
 	struct ae_model {
 		using layer_image = ML::image::value_image_lines<float>;
-		//using layer_image_iterator = ML::image::value_image_lines_iterator;
+		using dimensions_t = value_image_lines_dimensions;
 
-		image_dimensions input_dimensions;
+		dimensions_t input_dimensions;
 		vector<ae_layer> layers;
 
-		ae_model(image_dimensions input_dimensions) {
+		ae_model(value_image_lines_dimensions input_dimensions) {
 			this->input_dimensions = input_dimensions;
 			init_model_topology();
 		}
 
 	private:
-		/*
-			generates connections from AxA square of pixels (from input)
-			to 1x1 square (in output), with AxA input square centered on output pixel.
-
-			NOTE:
-			- output layer should have the same neuron-layout as image-data does.
-			- odd values of A are preferred (for symmetry).
-			- if mix_channels is true, every pixel-value in input is connected to each
-			pixel-value-neuron in output.
-			- if mix_channels is false, channels are kept seperate.
-		*/
-		void push_layer_mix_AxA_to_1x1(const image_dimensions dim, const int A, bool mix_channels) {
-			// create output layer and generate targets for each neuron (pixel-value) in output.
-			// NOTE: the order these target-lists are generated in must match order of neurons.
-			layers.push_back(ae_layer(dim.length(), dim.length()));
-			ae_layer& output_layer = layers.back();
-			layer_image_iterator output_iter = dim.get_iterator();
-			while(output_iter.has_next()) {
-				int x0 = std::max(output_iter.x - A/2, 0);
-				int y0 = std::max(output_iter.y - A/2, 0);
-				int x1 = std::min(x0 + A, dim.X);
-				int y1 = std::min(y0 + A, dim.Y);
-				vector<int> connection_inds = dim.generate_target_indices(x0, x1, y0, y1, mix_channels ? -1 : output_iter.c);
-				output_layer.foreward_targets.push_list(connection_inds);
-				output_iter.next();
-			}
-			output_layer.sync_targets_list();
-		}
-
-		/*
-			generates connections such that each AxA square from input is scaled
-			into a BxB square in output.
-
-			NOTE: image dimensions A and B must be picked such that image scales cleanly.
-		*/
-		void push_layer_scale_AxA_to_BxB(const image_dimensions idim, image_dimensions& odim, const int A, const int B, const int inC, const int outC, bool mix_channels) {
-			// make sure images will scale cleanly, and have size compatible with choice of A and B.
-			// - images dimensions should be divisible by A (input) or B (output).
-			// - images should have the same number of AxA or BxB tiles as eachother in each dimension.
-			// - if not mixing channels, then output and input should have same number of channels.
-			odim = idim;
-			odim.X = (odim.X * B) / A;
-			odim.Y = (odim.Y * B) / A;
-			odim.C = outC;
-			odim.TC = outC;
-			assert(idim.X % A == 0);
-			assert(idim.Y % A == 0);
-			assert(odim.X % B == 0);
-			assert(odim.Y % B == 0);
-			assert(idim.X / A == odim.X / B);
-			assert(idim.Y / A == odim.Y / B);
-			assert(mix_channels || (odim.C == idim.C));
-
-			// create output layer and generate targets for each neuron (pixel-value) in output.
-			// NOTE: the order these target-lists are generated in must match order of neurons.
-			layers.push_back(ae_layer(idim.length(), odim.length()));
-			ae_layer& output_layer = layers.back();
-			layer_image_iterator output_iter = odim.get_iterator();
-			while(output_iter.has_next()) {
-				int x0 = (output_iter.x / B) * A;
-				int y0 = (output_iter.y / B) * A;
-				int x1 = x0 + A;
-				int y1 = y0 + A;
-				vector<int> connection_inds = idim.generate_target_indices(x0, x1, y0, y1, mix_channels ? -1 : output_iter.c);
-				output_layer.foreward_targets.push_list(connection_inds);
-				output_iter.next();
-			}
-			output_layer.sync_targets_list();
+		void push_layer_scale_AxA_to_BxB(const dimensions_t idim, dimensions_t& odim, const int A, const int B, const int M) {
+			odim.X = (idim.X * B) / A;
+			odim.Y = (idim.Y * B) / A;
+			scale_ratio scale = { A, B, M };
+			//printf("idim: X=%i, Y=%i, C=%i, odim: X=%i, Y=%i, C=%i\n", idim.X, idim.Y, idim.C, odim.X, odim.Y, odim.C);
+			layers.push_back(ae_layer(idim, odim, scale));
 		}
 
 		/*
@@ -105,27 +43,23 @@ namespace ML::models::autoencoder {
 			layers.clear();
 
 			// input.
-			image_dimensions idim = input_dimensions;
-			image_dimensions odim = idim;
+			dimensions_t idim = input_dimensions;
+			dimensions_t odim = idim;
 			const int ch = idim.C;
 
 			// mix and condense image.
-			// (w, h) -> (w/8, h/8)
-			push_layer_mix_AxA_to_1x1(idim, 3, false);
-			push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, ch, 12, true); idim = odim;
-			push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, 12, 16, true); idim = odim;
+			odim.C= 8; push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, 16); idim = odim;
+			odim.C=24; push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, 16); idim = odim;
+			odim.C=72; push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, 16); idim = odim;
 
 			// expand image back to original size.
-			push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 16, 12, true); idim = odim;
-			push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 12, ch, true); idim = odim;
-			push_layer_mix_AxA_to_1x1(idim, 3, false);
+			odim.C=24; push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 4); idim = odim;
+			odim.C= 8; push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 4); idim = odim;
+			odim.C=ch; push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 4); idim = odim;
 
-			assert(odim.X == idim.X);
-			assert(odim.Y == idim.Y);
-			assert(odim.C == idim.C);
-			assert(odim.TX == idim.TX);
-			assert(odim.TY == idim.TY);
-			assert(odim.TC == idim.TC);
+			assert(odim.X == input_dimensions.X);
+			assert(odim.Y == input_dimensions.Y);
+			assert(odim.C == input_dimensions.C);
 		}
 
 	public:
@@ -136,20 +70,9 @@ namespace ML::models::autoencoder {
 
 			for(int z=0;z<layers.size();z++) {
 				auto& layer = layers[z];
-				//for(auto& bias   : layer.biases) bias = distr_bias(gen32);
-				//for(auto& target : layer.foreward_targets.targets) target.weight = distr_weight(gen32);
-				///*
-				for(int n=0;n<layer.biases.size();n++) {
-					layer.biases[n] = distr_bias(gen32);
-					target_itv itv = layer.foreward_targets.get_interval(n);
-					const float mult = sqrtf(1.0f / (itv.end - itv.beg));
-					for(int x=itv.beg;x<itv.end;x++) {
-						layer.foreward_targets.targets[x].weight = distr_weight(gen32) * mult;
-						//layer.foreward_targets.targets[x].weight = distr_weight(gen32);
-					}
-				}
-				//*/
-				layer.foreward_targets.save_weights(layer.backprop_targets);
+				const float mult = sqrtf(1.0f / layer.weights_per_output_neuron());
+				for(int n=0;n<layer.biases.size();n++) layer.biases[n] = distr_bias(gen32);
+				for(int x=0;x<layer.weights.size();x++) layer.weights[x] = distr_weight(gen32) * mult;
 			}
 		}
 
@@ -182,7 +105,7 @@ namespace ML::models::autoencoder {
 			WARNING: loss_squared can lead to error-concentration which causes models to explode
 			when training is going well and they are very close to 0 average error.
 		*/
-		void generate_error_image(const value_image_tiled<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared, bool clamp_error) {
+		void generate_error_image(const value_image_lines<float>& input, const vector<float>& output, vector<float>& error, bool loss_squared, bool clamp_error) {
 			// assertions.
 			const int IMAGE_SIZE = input.X * input.Y * input.C;
 			assert(input.data.size() == IMAGE_SIZE);
@@ -192,7 +115,7 @@ namespace ML::models::autoencoder {
 			// clear error image.
 			for(int x=0;x<IMAGE_SIZE;x++) error[x] = 0;
 
-			value_image_tile_iterator sample_iter = input.get_iterator(
+			value_image_lines_iterator sample_iter = input.get_iterator(
 				input.x0, input.x1,
 				input.y0, input.y1,
 				0, input.C

@@ -84,7 +84,7 @@ namespace ML::stats {
 		printf("\n");
 	}
 
-	void print_percentiles(const vector<int>& percentiles, string name, string fmt, int column_width, int first_column_width, int sum_column_width, vector<float> values) {
+	void print_percentiles(const vector<int>& percentiles, const string name, const string fmt, const int column_width, const int first_column_width, const int sum_column_width, const vector<float> values) {
 		if(values.size() < 1) return;
 		{
 			string str = utils::string_manip::get_padded_number_string("%s", name.c_str(), first_column_width, false);
