@@ -109,6 +109,7 @@ namespace ML::image {
 		int sx0,sx1;
 		int sy0,sy1;
 
+		value_image_padded() = default;
 		value_image_padded(value_image_padded_dimensions dim) {
 			this->dim = dim;
 			this->data.resize(dim.outer_length());
