@@ -160,13 +160,21 @@ namespace ML::models::autoencoder_fixed {
 			};
 		}
 
-		// get the (unclamped) area of output-neurons read from this input-neuron.
 		image_area get_output_area(int ix, int iy) const {
 			const image_itv itv_x = output_area_x[ix];
 			const image_itv itv_y = output_area_y[iy];
 			return image_area {
 				itv_x.p0, itv_x.p1,
 				itv_y.p0, itv_y.p1,
+			};
+		}
+
+		image_area get_output_area_clamped(int ix, int iy) const {
+			const image_itv itv_x = output_area_x[ix];
+			const image_itv itv_y = output_area_y[iy];
+			return image_area {
+				std::max(itv_x.p0, 0), std::min(itv_x.p1, odim.X),
+				std::max(itv_y.p0, 0), std::min(itv_y.p1, odim.Y),
 			};
 		}
 	};
@@ -223,19 +231,19 @@ namespace ML::models::autoencoder_fixed {
 		static float activation_func(const float value) {
 			const float sign = value >= 0.0f ? 1.0f : -1.0f;
 			const float mag = std::abs(value);
-			if(mag < 0.5f) return value * 1.0f;						// [0.0, 0.5] 0.00 -> 0.50
-			if(mag < 1.0f) return value * 0.7f + (sign * 0.15f);	// [0.5, 1.0] 0.50 -> 0.85
-			if(mag < 2.0f) return value * 0.5f + (sign * 0.35f);	// [1.0, 2.0] 0.85 -> 1.35
-			if(mag < 4.0f) return value * 0.3f + (sign * 0.75f);	// [2.0, 4.0] 1.35 -> 1.95
-			return value * 0.1f + (sign * 1.55f);					// [4.0, inf] 1.95 -> inf.
+			if(mag < 0.25f) return value * 1.0f;					// [0.00, 0.25] 0.000 -> 0.250
+			if(mag < 0.50f) return value * 0.7f + (sign * 0.075f);	// [0.25, 0.50] 0.250 -> 0.425
+			if(mag < 1.00f) return value * 0.5f + (sign * 0.175f);	// [0.50, 1.00] 0.425 -> 0.675
+			if(mag < 2.00f) return value * 0.3f + (sign * 0.375f);	// [1.00, 2.00] 0.675 -> 0.975
+			return value * 0.1f + (sign * 0.775f);					// [2.00,  inf] 0.975 -> inf.
 		}
 
 		static float activation_derivative(const float value) {
 			const float mag = std::abs(value);
-			if(mag < 0.5f) return 1.0f;
-			if(mag < 1.0f) return 0.7f;
-			if(mag < 2.0f) return 0.5f;
-			if(mag < 4.0f) return 0.3f;
+			if(mag < 0.25f) return 1.0f;
+			if(mag < 0.50f) return 0.7f;
+			if(mag < 1.00f) return 0.5f;
+			if(mag < 2.00f) return 0.3f;
 			return 0.1f;
 		}
 
@@ -321,34 +329,32 @@ namespace ML::models::autoencoder_fixed {
 			const int WEIGHTS_PER_INPUT_NEURON = layer.weights_per_input_neuron();
 			const int W_STRIDE_X = idim.C;
 			const int W_STRIDE_Y = idim.C * scale.M;
-			//const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);// TODO - test if this helps or hinders deep autoencoders.
-			const float mult = 1.0f / WEIGHTS_PER_OUTPUT_NEURON;
+			const int E_STRIDE_X = odim.C;
+			const int E_STRIDE_Y = odim.C * scale.M * scale.B / scale.A;
+			const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);// TODO - test if this helps or hinders deep autoencoders.
+			//const float mult = 1.0f / WEIGHTS_PER_OUTPUT_NEURON;
 
 			// for each input neuron in input-area...
 			for(int iy=i_area.y0;iy<i_area.y1;iy++) {
-			for(int ix=i_area.x0;ix<i_area.x1;ix++) { const image_area o_area = table.get_output_area(ix, iy);
+			for(int ix=i_area.x0;ix<i_area.x1;ix++) {
 			for(int ic=0;ic<idim.C;ic++) {
 				const int in_n = idim.get_offset(ix, iy, ic);
-				int e = in_n * WEIGHTS_PER_INPUT_NEURON;// weight-error index.
 				float input_error_sum = 0;
 				// for each output neuron that may read from it...
+				const image_area o_area = table.get_output_area_clamped(ix, iy);
 				for(int oy=o_area.y0;oy<o_area.y1;oy++) {
 				for(int ox=o_area.x0;ox<o_area.x1;ox++) {
-				if(odim.is_within_bounds(ox, oy)) {
+					const int e = (in_n * WEIGHTS_PER_INPUT_NEURON) + ((ox - o_area.x0) * E_STRIDE_X) + ((oy - o_area.y0) * E_STRIDE_Y);// weight-error index.
 					const image_area r_area = table.get_input_area(ox, oy);
 					const int wofs = ((iy - r_area.y0) * W_STRIDE_Y) + ((ix - r_area.x0) * W_STRIDE_X) + ic;
 					const int nofs = odim.get_offset(ox, oy, 0);
+				// accumulate input & weight error.
 				for(int oc=0;oc<odim.C;oc++) {
-					// compute the weight index that would be used to read this input-neuron.
 					const int out_n = nofs + oc;
 					const int w = out_n * WEIGHTS_PER_OUTPUT_NEURON + wofs;
-					// accumulate error.
 					const float error_term = signal_error_terms[out_n];
-					input_error_sum        += error_term * mult * layer.weights[w];
-					layer.weights_error[e] += error_term * mult * input_value[in_n];
-					e++;
-				}} else {
-					e += odim.C;
+					layer.weights_error[e+oc] += error_term * mult * input_value[in_n];
+					input_error_sum           += error_term * mult * layer.weights[w];
 				}
 				}}
 				input_error[in_n] = input_error_sum;

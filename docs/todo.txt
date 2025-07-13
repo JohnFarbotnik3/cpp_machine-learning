@@ -170,6 +170,11 @@ of offsets for input area (if thats even needed - it probably wont be with the a
 ^ create a padded_value_image type for this. having a good get_offset(x,y,c) function would help a lot.
 - there should be some minimum subimage size (ex. 64*64 or 128*128),
 because otherwise thread-spawning and padding-exchange would add too much overhead.
+* it may help to use the fw/bp target paradigm for better data locality during backprop,
+but the target_index doesnt need to be computed; batch_apply_error can handle the inverse mapping,
+and some things will be made simpler by having a *fixed* number of targets for each neuron (some of which will be unused).
+^ neuron_index may not be needed either?
+* we may want to store extra info in the layers for keeping track of properties of subimages.
 
 
 
