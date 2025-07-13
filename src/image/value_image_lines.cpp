@@ -105,9 +105,6 @@ namespace ML::image {
 		int X = 0;// width.
 		int Y = 0;// height.
 		int C = 0;// number of channels.
-		int TX = 0;// tile width.
-		int TY = 0;// tile height.
-		int TC = 0;// tile channels.
 		// sample bounds.
 		int x0,x1;
 		int y0,y1;
