@@ -321,7 +321,8 @@ namespace ML::models::autoencoder_fixed {
 			const int WEIGHTS_PER_INPUT_NEURON = layer.weights_per_input_neuron();
 			const int W_STRIDE_X = idim.C;
 			const int W_STRIDE_Y = idim.C * scale.M;
-			const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);// TODO - test if this helps or hinders deep autoencoders.
+			//const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);// TODO - test if this helps or hinders deep autoencoders.
+			const float mult = 1.0f / WEIGHTS_PER_OUTPUT_NEURON;
 
 			// for each input neuron in input-area...
 			for(int iy=i_area.y0;iy<i_area.y1;iy++) {
@@ -335,12 +336,12 @@ namespace ML::models::autoencoder_fixed {
 				for(int ox=o_area.x0;ox<o_area.x1;ox++) {
 				if(odim.is_within_bounds(ox, oy)) {
 					const image_area r_area = table.get_input_area(ox, oy);
-					const int wofs_y = (iy - r_area.y0) * W_STRIDE_Y;
-					const int wofs_x = (ix - r_area.x0) * W_STRIDE_X;
+					const int wofs = ((iy - r_area.y0) * W_STRIDE_Y) + ((ix - r_area.x0) * W_STRIDE_X) + ic;
+					const int nofs = odim.get_offset(ox, oy, 0);
 				for(int oc=0;oc<odim.C;oc++) {
 					// compute the weight index that would be used to read this input-neuron.
-					const int out_n = odim.get_offset(ox, oy, oc);
-					const int w = (out_n * WEIGHTS_PER_OUTPUT_NEURON) + wofs_x + wofs_y + ic;
+					const int out_n = nofs + oc;
+					const int w = out_n * WEIGHTS_PER_OUTPUT_NEURON + wofs;
 					// accumulate error.
 					const float error_term = signal_error_terms[out_n];
 					input_error_sum        += error_term * mult * layer.weights[w];

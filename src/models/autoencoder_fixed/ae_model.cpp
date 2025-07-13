@@ -48,14 +48,14 @@ namespace ML::models::autoencoder_fixed {
 			const int ch = idim.C;
 
 			// mix and condense image.
-			odim.C= 8; push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, 16); idim = odim;
+			odim.C= 8; push_layer_scale_AxA_to_BxB(idim, odim, 8, 2,  8); idim = odim;
 			odim.C=24; push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, 16); idim = odim;
 			odim.C=72; push_layer_scale_AxA_to_BxB(idim, odim, 8, 2, 16); idim = odim;
 
 			// expand image back to original size.
 			odim.C=24; push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 4); idim = odim;
 			odim.C= 8; push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 4); idim = odim;
-			odim.C=ch; push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 4); idim = odim;
+			odim.C=ch; push_layer_scale_AxA_to_BxB(idim, odim, 2, 8, 2); idim = odim;
 
 			assert(odim.X == input_dimensions.X);
 			assert(odim.Y == input_dimensions.Y);
