@@ -123,10 +123,10 @@ namespace ML::models::autoencoder {
 
 		static void back_propagate_func_input_side(ae_layer& layer, vector<float>& input_error, const vector<float>& input_value, const vector<float>& signal_error_terms, const int i_beg, const int i_end) {
 			// for each neuron in input...
-			for(int n=i_beg;n<i_end;n++) {
+			for(int in_n=i_beg;in_n<i_end;in_n++) {
 				// gather input-error and weight-error.
 				float input_error_sum = 0;
-				const target_itv itv = layer.backprop_targets.get_interval(n);
+				const target_itv itv = layer.backprop_targets.get_interval(in_n);
 				for(int x=itv.beg;x<itv.end;x++) {
 					const backprop_target bt = layer.backprop_targets.targets[x];
 					const int& out_n = bt.neuron_index;
@@ -135,9 +135,9 @@ namespace ML::models::autoencoder {
 					const float mult = 1.0f / num_inputs;
 					// TODO - test using "mult=sqrtf(1.0f / num_inputs);".
 					input_error_sum        += error_term * mult * bt.weight;
-					layer.weights_error[x] += error_term * mult * input_value[n];
+					layer.weights_error[x] += error_term * mult * input_value[in_n];
 				}
-				input_error[n] = input_error_sum;
+				input_error[in_n] = input_error_sum;
 			}
 		}
 

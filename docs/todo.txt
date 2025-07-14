@@ -203,6 +203,11 @@ of using caching.
 ...
 
 
+> subimage autoencoder
+! only the inner part of output image participates in foreward-prop,
+but the whole image - including padding - participates in back-prop.
+
+
 
 > add to journal:
 - switching from ReLU with leakage to piecewise sigmoid to fix bias degeneration

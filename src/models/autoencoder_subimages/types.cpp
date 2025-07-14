@@ -6,12 +6,10 @@
 
 namespace ML::models::autoencoder_subimage {
 	using namespace ML::image;
-	using image_t = ML::image::value_image_padded<float>;
+	using image_f = ML::image::value_image_padded<float>;
+	using image_i = ML::image::value_image_padded<int>;
 	using iter_t = ML::image::value_image_padded_iterator;
 	using dim_t = ML::image::value_image_padded_dimensions;
-
-	struct fw_target { float weight=0.0f; };
-	struct bp_target { float weight=0.0f, weight_error=0.0f; int output_neuron_index; };
 
 	enum LAYER_TYPE {
 		NONE,
@@ -46,6 +44,19 @@ namespace ML::models::autoencoder_subimage {
 		int A,B;
 		int N,M;
 	};
+
+	struct fw_target { float weight=0.0f; };
+	struct bp_target { float weight=0.0f, weight_error=0.0f; int output_neuron_index; };
+	struct fw_target_list {
+		int weights_per_output_neuron;
+		vector<fw_target> targets;
+	};
+	struct bp_target_list {
+		image_i intervals;// postfix-intervals of targets belonging to each input-neuron.
+		vector<bp_target> targets;
+		vector<int> ft_indices;// index of fw_targets, used for syncing weights.
+	};
+
 
 }
 

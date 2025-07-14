@@ -38,7 +38,7 @@ namespace ML::image {
 		int outer_length() const { return outerX() * outerY() * outerC(); }
 		int inner_length() const { return innerX() * innerY() * innerC(); }
 
-		int get_offset(const int x, const int y, const int c) const {
+		int get_offset_padded(const int x, const int y, const int c) const {
 			return (((y+padY)*X) + (x+padX))*C + c;
 		}
 	};
@@ -74,7 +74,7 @@ namespace ML::image {
 			this->x = x0;
 			this->y = y0;
 			this->c = c0;
-			this->i = dim.get_offset(x, y, c);
+			this->i = dim.get_offset_padded(x, y, c);
 			this->irem = length();
 			// assertions.
 			assert(x0 >= 0);
@@ -96,7 +96,7 @@ namespace ML::image {
 			c++;
 			if(c >= c1) { c=c0; x++; }
 			if(x >= x1) { x=x0; y++; }
-			i = dim.get_offset(x, y, c);
+			i = dim.get_offset_padded(x, y, c);
 			return i;
 		}
 	};

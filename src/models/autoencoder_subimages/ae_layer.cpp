@@ -128,8 +128,8 @@ namespace ML::models::autoencoder_subimage {
 
 		static void back_propagate_func_output_side(ae_layer& layer, vector<float>& signal_error_terms, const vector<float>& output_error, const image_area o_area) {
 			for(int y=o_area.y0;y<o_area.y1;y++) {
-				const int i0 = layer.odim.get_offset(o_area.x0, y, 0);
-				const int i1 = layer.odim.get_offset(o_area.x1, y, 0);
+				const int i0 = layer.odim.get_offset_padded(o_area.x0, y, 0);
+				const int i1 = layer.odim.get_offset_padded(o_area.x1, y, 0);
 				for(int n=i0;n<i1;n++) signal_error_terms[n] = output_error[n] * activation_derivative(layer.signal[n]);
 				for(int n=i0;n<i1;n++) layer.biases_error[n] += signal_error_terms[n];
 			}
