@@ -16,7 +16,7 @@ namespace ML::image {
 		int Y = 0;// height of image.
 		int C = 0;// number of channels per pixel.
 	public:
-		// internal image bounds.
+		// width of padding pixels along image perimeter.
 		int padX = 0;
 		int padY = 0;
 
