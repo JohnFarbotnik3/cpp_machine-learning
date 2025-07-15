@@ -21,23 +21,11 @@ namespace ML::models::autoencoder_subimage {
 		ae_layer(
 			const dim_t idim,
 			const dim_t odim,
-			layer_pattern pattern
+			const layer_pattern pattern
 		) : idim(idim), odim(odim), pattern(pattern) {
-			const int OUTPUT_IMAGE_SIZE = output_image_size();
-			biases.resize(OUTPUT_IMAGE_SIZE, 0.0f);
-			biases_error.resize(OUTPUT_IMAGE_SIZE, 0.0f);
-			output.resize(OUTPUT_IMAGE_SIZE, 0.0f);
-			signal.resize(OUTPUT_IMAGE_SIZE, 0.0f);
-			fw_targets.resize(OUTPUT_IMAGE_SIZE * weights_per_output_neuron(), fw_target{ 0.0f });
-			bp_targets.resize(OUTPUT_IMAGE_SIZE * weights_per_output_neuron(), bp_target{ 0.0f, 0.0f });
-		}
 
-		int weights_per_output_neuron() const {
-			return pattern.M * pattern.M * idim.C;
+
 		}
-		int weights_per_input_neuron() const {
-			return weights_per_output_neuron() * output_image_size() / input_image_size();
-		};
 
 		// ============================================================
 		// activation functions.

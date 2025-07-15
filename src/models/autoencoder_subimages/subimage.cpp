@@ -1,5 +1,6 @@
 
 #include "types.cpp"
+#include "patterns.cpp"
 
 namespace ML::models::autoencoder_subimage {
 	struct subimage {
@@ -8,6 +9,7 @@ namespace ML::models::autoencoder_subimage {
 		image_f biases_error;// accumulated error in biases during minibatch.
 		image_f signal;// image of signal values - used for backprop.
 		image_f output;// image of output values - used for backprop.
+		neuron_offset_struct fw_offsets;
 		fw_target_list fw_targets;
 		bp_target_list bp_targets;
 
@@ -19,23 +21,19 @@ namespace ML::models::autoencoder_subimage {
 		signal		(odim),
 		output		(odim)
 		{
-			const int IMAGE_SIZE_I = idim.inner_length();
-			const int IMAGE_SIZE_O = odim.inner_length();
-			int n_weights = 0;
-			if(pattern.type == LAYER_TYPE::ENCODE		) n_weights = IMAGE_SIZE_O * pattern.A * pattern.A * idim.innerC();
-			if(pattern.type == LAYER_TYPE::SPATIAL_MIX	) n_weights = IMAGE_SIZE_O * pattern.N * pattern.N;
-			if(pattern.type == LAYER_TYPE::ENCODE_MIX	) n_weights = IMAGE_SIZE_O * pattern.N * pattern.N * idim.innerC();
-			if(pattern.type == LAYER_TYPE::DENSE		) n_weights = IMAGE_SIZE_O * IMAGE_SIZE_I;
-			assert(n_weights > 0);
-			// TODO - initialize bp target indices.
-		}
-
-		int input_image_size() const  {
-			return input.dim.inner_length();
-		}
-		int output_image_size() const {
-			return output.dim.inner_length();
+			assert(idim.inner_length() > 0);
+			assert(odim.inner_length() > 0);
+			assert(odim.padX == 0);
+			assert(odim.padY == 0);
+			fw_offsets = get_input_neuron_offsets_kernel(pattern, idim, odim);
+			fw_targets = init_fw_targets(fw_offsets, odim);
+			bp_targets = init_bp_targets(fw_offsets, idim, odim);
 		}
 	};
-
 }
+
+
+
+
+
+

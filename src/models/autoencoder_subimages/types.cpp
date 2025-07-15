@@ -54,7 +54,19 @@ namespace ML::models::autoencoder_subimage {
 	struct bp_target_list {
 		image_i intervals;// postfix-intervals of targets belonging to each input-neuron.
 		vector<bp_target> targets;
-		vector<int> ft_indices;// index of fw_targets, used for syncing weights.
+	};
+
+	struct neuron_offset_struct {
+		/*
+			each output-neuron reads from a similar arrangement of input-values;
+			this arrangement is stored as a re-usable kernel of offsets.
+		*/
+		vector<int> kernel;
+		/*
+			each output-neuron may read from a different area of the input-image;
+			these offsets are meant to be combined with the kernel to get input-value indices.
+		*/
+		image_i kernel_offsets;
 	};
 
 
