@@ -176,10 +176,53 @@ namespace ML::models::autoencoder_subimage {
 		return list;
 	}
 
-	void sync_weights_fw_to_bp() {}// TODO
+	void sync_weights_fw_to_bp(const neuron_offset_struct& offset_struct, const dim_t idim, const dim_t odim, const fw_target_list& fw_targets, bp_target_list& bp_targets) {
+		// initialize array of target interval start pointers.
+		vector<int> ptrs(idim.outer_length());
+		int b = 0;
+		for(int x=0;x<bp_targets.intervals.data.size();x++) { ptrs[x]=b; b=bp_targets.intervals.data[x]; }
 
-	void sync_weights_bp_to_fw() {}// TODO
+		// create targets.
+		const vector<int>&	kernel = offset_struct.kernel;
+		const vector<int>&	kernel_offsets = offset_struct.kernel_offsets.data;
+		for(int oy=0;oy<odim.innerY();oy++) {
+		for(int ox=0;ox<odim.innerX();ox++) {
+		for(int oc=0;oc<odim.innerC();oc++) {
+			const int out_n = odim.get_offset_padded(ox, oy, oc);
+			const int k_ofs = kernel_offsets[out_n];
+			int ft_n = out_n * kernel.size();
+			for(int i=0;i<kernel.size();i++) {
+				const int in_n = kernel[i] + k_ofs;
+				const fw_target& ft = fw_targets.targets[ft_n++];
+				bp_target& bt = bp_targets.targets[ptrs[in_n]++];
+				bt.weight = ft.weight;
+			}
+		}}}
+	}
 
+	void sync_weights_bp_to_fw(const neuron_offset_struct& offset_struct, const dim_t idim, const dim_t odim, fw_target_list& fw_targets, const bp_target_list& bp_targets) {
+		// initialize array of target interval start pointers.
+		vector<int> ptrs(idim.outer_length());
+		int b = 0;
+		for(int x=0;x<bp_targets.intervals.data.size();x++) { ptrs[x]=b; b=bp_targets.intervals.data[x]; }
+
+		// create targets.
+		const vector<int>&	kernel = offset_struct.kernel;
+		const vector<int>&	kernel_offsets = offset_struct.kernel_offsets.data;
+		for(int oy=0;oy<odim.innerY();oy++) {
+		for(int ox=0;ox<odim.innerX();ox++) {
+		for(int oc=0;oc<odim.innerC();oc++) {
+			const int out_n = odim.get_offset_padded(ox, oy, oc);
+			const int k_ofs = kernel_offsets[out_n];
+			int ft_n = out_n * kernel.size();
+			for(int i=0;i<kernel.size();i++) {
+				const int in_n = kernel[i] + k_ofs;
+				fw_target& ft = fw_targets.targets[ft_n++];
+				const bp_target& bt = bp_targets.targets[ptrs[in_n]++];
+				ft.weight = bt.weight;
+			}
+		}}}
+	}
 }
 
 
