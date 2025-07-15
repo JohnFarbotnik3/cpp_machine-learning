@@ -176,6 +176,10 @@ namespace ML::models::autoencoder_subimage {
 		return list;
 	}
 
+	void sync_weights_fw_to_bp() {}// TODO
+
+	void sync_weights_bp_to_fw() {}// TODO
+
 }
 
 
