@@ -1,33 +1,98 @@
 
 #include "types.cpp"
 #include "patterns.cpp"
+#include <cassert>
+#include "src/utils/vector_util.cpp"
 
 namespace ML::models::autoencoder_subimage {
 	struct subimage {
-		image_f input;
 		image_f biases;
-		image_f biases_error;// accumulated error in biases during minibatch.
-		image_f signal;// image of signal values - used for backprop.
-		image_f output;// image of output values - used for backprop.
+		image_f biases_error;	// accumulated error in biases during minibatch.
+		image_f signal;			// image of signal values - used for backprop.
+		image_f value_image_i;	// input values - populated externally.
+		image_f value_image_o;
+		image_f error_image_i;
+		image_f error_image_o;	// output-side error - populated externally.
 		neuron_offset_struct fw_offsets;
-		fw_target_list fw_targets;
-		bp_target_list bp_targets;
+		vector<float> weights;
+		vector<float> weights_error;
 
 		subimage() = default;
 		subimage(const dim_t idim, const dim_t odim, const layer_pattern pattern) :
-		input		(idim),
-		biases		(odim),
-		biases_error(odim),
-		signal		(odim),
-		output		(odim)
+			biases			(odim),
+			biases_error	(odim),
+			signal			(odim),
+			value_image_i	(idim),
+			value_image_o	(odim),
+			error_image_i	(idim),
+			error_image_o	(odim)
 		{
 			assert(idim.inner_length() > 0);
 			assert(odim.inner_length() > 0);
-			assert(odim.padX == 0);
-			assert(odim.padY == 0);
+			assert(!odim.has_padding());
 			fw_offsets = get_input_neuron_offsets_kernel(pattern, idim, odim);
-			fw_targets = init_fw_targets(fw_offsets, odim);
-			bp_targets = init_bp_targets(fw_offsets, idim, odim);
+			const int n_weights = fw_offsets.kernel.size() * odim.inner_length();
+			weights.resize(n_weights, 0.0f);
+			weights_error.resize(n_weights, 0.0f);
+		}
+
+		void foreward_propagate() {
+			const dim_t idim = value_image_i.dim;
+			const dim_t odim = value_image_o.dim;
+			const int WEIGHTS_PER_OUTPUT_NEURON = fw_offsets.kernel.size();
+
+			for(int out_n=0;out_n<odim.outer_length();out_n++) {
+				const int kofs = fw_offsets.kernel_offsets.data[out_n];
+				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
+				float sum = biases.data[out_n];
+				for(int x=0;x<WEIGHTS_PER_OUTPUT_NEURON;x++) {
+					const int in_n = fw_offsets.kernel[x] + kofs;
+					sum += weights[wofs + x] * value_image_i.data[in_n];
+				}
+				signal			.data[out_n] = sum;
+				value_image_o	.data[out_n] = activation_func(sum);
+			}
+		}
+
+		void backward_propagate() {
+			const dim_t idim = error_image_i.dim;
+			const dim_t odim = error_image_o.dim;
+			const int WEIGHTS_PER_OUTPUT_NEURON = fw_offsets.kernel.size();
+			//const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
+			const float mult = 1.0f / WEIGHTS_PER_OUTPUT_NEURON;
+
+			error_image_i.clear();
+			for(int out_n=0;out_n<odim.outer_length();out_n++) {
+				const int kofs = fw_offsets.kernel_offsets.data[out_n];
+				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
+				const float signal_error_term = error_image_o.data[out_n] * activation_derivative(signal.data[out_n]);
+				biases_error.data[out_n] += signal_error_term;
+				for(int x=0;x<WEIGHTS_PER_OUTPUT_NEURON;x++) {
+					const int in_n = fw_offsets.kernel[x] + kofs;
+					weights_error[wofs + x]		+= signal_error_term * mult * value_image_i.data[in_n];
+					error_image_i.data[in_n]	+= signal_error_term * mult * weights[wofs + x];
+				}
+			}
+		}
+
+		void apply_batch_error_biases(const float adjustment_rate) {
+			const float BIAS_LIMIT = 100.0f;
+			const float BIAS_ADJUSTMENT_LIMIT = 0.5f;
+			for(int n=0;n<biases.data.size();n++) {
+				const float adjustment = std::clamp(biases_error.data[n] * adjustment_rate, -BIAS_ADJUSTMENT_LIMIT, +BIAS_ADJUSTMENT_LIMIT);
+				biases.data[n] = std::clamp(biases.data[n] + adjustment, -BIAS_LIMIT, +BIAS_LIMIT);
+			}
+			utils::vector_util::vec_fill(biases_error.data, 0.0f);
+		}
+
+		void apply_batch_error_weights(const float adjustment_rate) {
+			const float WEIGHT_LIMIT = 100.0f;
+			const float WEIGHT_ADJUSTMENT_LIMIT = 0.5f;
+			for(int x=0;x<weights.size();x++) {
+				const float adjustment = std::clamp(weights_error[x] * adjustment_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
+				weights[x] = std::clamp(weights[x] + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
+			}
+			utils::vector_util::vec_fill(weights, 0.0f);
 		}
 	};
 }

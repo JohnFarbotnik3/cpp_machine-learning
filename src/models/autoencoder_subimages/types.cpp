@@ -58,7 +58,7 @@ namespace ML::models::autoencoder_subimage {
 
 	struct neuron_offset_struct {
 		/*
-			each output-neuron reads from a similar arrangement of input-values;
+			each output-neuron reads from a similar arrangement of input-values (for example, an NxN square);
 			this arrangement is stored as a re-usable kernel of offsets.
 		*/
 		vector<int> kernel;
@@ -69,6 +69,24 @@ namespace ML::models::autoencoder_subimage {
 		image_i kernel_offsets;
 	};
 
+	float activation_func(const float value) {
+		const float sign = value >= 0.0f ? 1.0f : -1.0f;
+		const float mag = std::abs(value);
+		if(mag < 0.25f) return value * 1.0f;					// [0.00, 0.25] 0.000 -> 0.250
+		if(mag < 0.50f) return value * 0.7f + (sign * 0.075f);	// [0.25, 0.50] 0.250 -> 0.425
+		if(mag < 1.00f) return value * 0.5f + (sign * 0.175f);	// [0.50, 1.00] 0.425 -> 0.675
+		if(mag < 2.00f) return value * 0.3f + (sign * 0.375f);	// [1.00, 2.00] 0.675 -> 0.975
+		return value * 0.1f + (sign * 0.775f);					// [2.00,  inf] 0.975 -> inf.
+	}
+
+	float activation_derivative(const float value) {
+		const float mag = std::abs(value);
+		if(mag < 0.25f) return 1.0f;
+		if(mag < 0.50f) return 0.7f;
+		if(mag < 1.00f) return 0.5f;
+		if(mag < 2.00f) return 0.3f;
+		return 0.1f;
+	}
 
 }
 

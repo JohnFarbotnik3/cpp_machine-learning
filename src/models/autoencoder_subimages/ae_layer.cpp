@@ -23,48 +23,26 @@ namespace ML::models::autoencoder_subimage {
 			const dim_t odim,
 			const layer_pattern pattern
 		) : idim(idim), odim(odim), pattern(pattern) {
-
+			// TODO - create grid of subimages.
 
 		}
 
 		// ============================================================
-		// activation functions.
+		// subimage manipulation.
 		// ------------------------------------------------------------
 
-		static float activation_func(const float value) {
-			const float sign = value >= 0.0f ? 1.0f : -1.0f;
-			const float mag = std::abs(value);
-			if(mag < 0.25f) return value * 1.0f;					// [0.00, 0.25] 0.000 -> 0.250
-			if(mag < 0.50f) return value * 0.7f + (sign * 0.075f);	// [0.25, 0.50] 0.250 -> 0.425
-			if(mag < 1.00f) return value * 0.5f + (sign * 0.175f);	// [0.50, 1.00] 0.425 -> 0.675
-			if(mag < 2.00f) return value * 0.3f + (sign * 0.375f);	// [1.00, 2.00] 0.675 -> 0.975
-			return value * 0.1f + (sign * 0.775f);					// [2.00,  inf] 0.975 -> inf.
-		}
+		void foreward_propagate_subimages_load(const image_f& input_values) {}
+		void foreward_propagate_subimages_middle(const ae_layer& prev_layer) {}
+		void foreward_propagate_subimages_save(image_f& output_values) {}
 
-		static float activation_derivative(const float value) {
-			const float mag = std::abs(value);
-			if(mag < 0.25f) return 1.0f;
-			if(mag < 0.50f) return 0.7f;
-			if(mag < 1.00f) return 0.5f;
-			if(mag < 2.00f) return 0.3f;
-			return 0.1f;
-		}
+		void backward_propagate_subimages_save(image_f& input_error) {}
+		void backward_propagate_subimages_middle(ae_layer& prev_layer) {}
+		void backward_propagate_subimages_load(image_f& output_error) {}
 
 		// ============================================================
 		// network functions
 		// ------------------------------------------------------------
 
-		static vector<image_area> generate_intervals(const int n_threads, const value_image_lines_dimensions dim) {
-			vector<image_area> intervals;
-			for(int z=0;z<n_threads;z++) {
-				const int x0 = 0;
-				const int x1 = dim.X;
-				const int y0 = ((z+0) * dim.Y) / n_threads;
-				const int y1 = ((z+1) * dim.Y) / n_threads;
-				intervals.push_back(image_area{ x0, x1, y0, y1});
-			}
-			return intervals;
-		}
 
 		static void propagate_func(ae_layer& layer, const vector<float>& input_values, vector<float>& output_values, const image_area o_area) {
 			const value_image_lines_dimensions& idim = layer.idim;

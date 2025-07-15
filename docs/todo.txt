@@ -213,6 +213,7 @@ then benchmark to examine performance.
 simple scatter-style backprop to quantify difference.
 it would be strongly preferable to use simple backprop
 and get rid of bp_targets altogether if the performance penalty is not too severe.
+* try pinning particular subimages to particular cores to see if there is a performance benefit.
 
 
 > add to journal:

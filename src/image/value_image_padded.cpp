@@ -41,6 +41,20 @@ namespace ML::image {
 		int get_offset_padded(const int x, const int y, const int c) const {
 			return (((y+padY)*X) + (x+padX))*C + c;
 		}
+
+		bool has_padding() const {
+			return (padX > 0) | (padY > 0);
+		}
+
+		bool equals(const value_image_padded_dimensions& other) const {
+			return (
+				(other.X == X) &
+				(other.Y == Y) &
+				(other.C == C) &
+				(other.padX == padX) &
+				(other.padY == padY)
+			);
+		}
 	};
 
 	struct value_image_padded_iterator {
@@ -106,15 +120,11 @@ namespace ML::image {
 		vector<T> data;
 		value_image_padded_dimensions dim;
 		// sample bounds.
-		int sx0,sx1;
-		int sy0,sy1;
+		int sx0 = 0, sx1 = 0;
+		int sy0 = 0, sy1 = 0;
 
 		value_image_padded() = default;
-		value_image_padded(value_image_padded_dimensions dim) {
-			this->dim = dim;
-			this->data.resize(dim.outer_length(), 0);
-			clear();
-		}
+		value_image_padded(value_image_padded_dimensions dim) : dim(dim), data(dim.outer_length(), 0) {}
 
 		void clear() {
 			for(int x=0;x<data.size();x++) data[x] = 0;
