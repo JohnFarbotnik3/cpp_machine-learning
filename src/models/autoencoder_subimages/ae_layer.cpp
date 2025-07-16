@@ -12,17 +12,24 @@ namespace ML::models::autoencoder_subimage {
 		layer_pattern pattern;
 		dim_t idim;// overall dimensions of input.
 		dim_t odim;// overall dimensions of output.
+		dim_t subidim;// input  dimensions of subimages.
+		dim_t subodim;// output dimensions of subimages.
 		vector<subimage> subimages;
 		int subimage_grid_X;// number of subimages along X-axis.
 		int subimage_grid_Y;// number of subimages along Y-axis.
 
 		// TODO - continue from here...
 
-		ae_layer(
-			const dim_t idim,
-			const dim_t odim,
-			const layer_pattern pattern
-		) : idim(idim), odim(odim), pattern(pattern) {
+		ae_layer(const dim_t idim, const dim_t odim, const layer_pattern pattern, const int grid_X, const int grid_Y) : idim(idim), odim(odim), pattern(pattern) {
+			// assert that overall input and output dimensions dont have padding.
+			assert(!idim.has_padding());
+			assert(!odim.has_padding());
+			// assert that image cleanly divides into subimages.
+			assert(idim.innerX() % grid_X == 0);
+			assert(idim.innerY() % grid_Y == 0);
+			assert(odim.innerX() % grid_X == 0);
+			assert(odim.innerY() % grid_Y == 0);
+
 			// TODO - create grid of subimages.
 
 		}
@@ -31,13 +38,127 @@ namespace ML::models::autoencoder_subimage {
 		// subimage manipulation.
 		// ------------------------------------------------------------
 
-		void foreward_propagate_subimages_load(const image_f& input_values) {}
-		void foreward_propagate_subimages_middle(const ae_layer& prev_layer) {}
-		void foreward_propagate_subimages_save(image_f& output_values) {}
+		static void subimage_load(const image_f& image, image_f& sub, const int image_x0, const int image_y0) {
+			assert(image.dim.outerC() == sub.dim.outerC());
+			const dim_t imgdim = image.dim;
+			const dim_t subdim = sub.dim;
+			const int ch = imgdim.outerC();
+			float* subdata = sub.data.data();
+			const float* imgdata = image.data.data();
 
-		void backward_propagate_subimages_save(image_f& input_error) {}
-		void backward_propagate_subimages_middle(ae_layer& prev_layer) {}
-		void backward_propagate_subimages_load(image_f& output_error) {}
+			// load inner part of subimage.
+			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.innerX();
+			for(int sy=0;sy<subdim.innerY();sy++) {
+				const int i0 = imgdim.get_offset_padded(image_x0, image_y0+sy, 0);
+				const int s0 = subdim.get_offset_padded(0, sy, 0);
+				memcpy(subdata+s0, imgdata+i0, ROW_SZ);
+			}
+
+			// load padding part of subimage.
+			const int pad = subdim.pad;
+			const int PIXEL_SZ = sizeof(imgdata[0]) * ch;
+			for(int sy=-pad;sy<subdim.innerY()+pad;sy++) {
+			for(int sx=-pad;sx<subdim.innerX()+pad;sx++) {
+				// NOTE: skip to end of inner-row when arriving at start of inner-row.
+				if(subdim.is_within_inner_bounds(sx, sy, 0) && sx==0) sx=subdim.innerX();
+				const int ix = image_x0 + sx;
+				const int iy = image_y0 + sy;
+				if(imgdim.is_within_inner_bounds(ix, iy, 0)) {
+					const int i0 = imgdim.get_offset_padded(ix, iy, 0);
+					const int s0 = subdim.get_offset_padded(sx, sy, 0);
+					memcpy(subdata+s0, imgdata+i0, PIXEL_SZ);
+				}
+			}}
+		}
+		static void subimage_save_inner(image_f& image, const image_f& sub, const int image_x0, const int image_y0) {
+			assert(image.dim.outerC() == sub.dim.outerC());
+			const dim_t imgdim = image.dim;
+			const dim_t subdim = sub.dim;
+			const int ch = imgdim.outerC();
+			const float* subdata = sub.data.data();
+			float* imgdata = image.data.data();
+
+			// save inner part of subimage.
+			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.innerX();
+			for(int sy=0;sy<subdim.innerY();sy++) {
+				const int i0 = imgdim.get_offset_padded(image_x0, image_y0+sy, 0);
+				const int s0 = subdim.get_offset_padded(0, sy, 0);
+				memcpy(imgdata+i0, subdata+s0, ROW_SZ);
+			}
+		}
+		static void subimage_save_outer(image_f& image, const image_f& sub, const int image_x0, const int image_y0) {
+			assert(image.dim.outerC() == sub.dim.outerC());
+			const dim_t imgdim = image.dim;
+			const dim_t subdim = sub.dim;
+			const int ch = imgdim.outerC();
+			const float* subdata = sub.data.data();
+			float* imgdata = image.data.data();
+
+			// save padding part of subimage.
+			// NOTE: this increments rather than overwrites content.
+			const int pad = subdim.pad;
+			for(int sy=-pad;sy<subdim.innerY()+pad;sy++) {
+			for(int sx=-pad;sx<subdim.innerX()+pad;sx++) {
+				// NOTE: skip to end of inner-row when arriving at start of inner-row.
+				if(subdim.is_within_inner_bounds(sx, sy, 0) && sx==0) sx=subdim.innerX();
+				const int ix = image_x0 + sx;
+				const int iy = image_y0 + sy;
+				if(imgdim.is_within_inner_bounds(ix, iy, 0)) {
+					const int i0 = imgdim.get_offset_padded(ix, iy, 0);
+					const int s0 = subdim.get_offset_padded(sx, sy, 0);
+					for(int c=0;c<ch;c++) imgdata[i0+c] += subdata[s0+c];
+				}
+			}}
+		}
+
+		void foreward_propagate_subimages_load(const image_f& input_values) {
+			for(int gy=0;gy<subimage_grid_Y;gy++) {
+			for(int gx=0;gx<subimage_grid_X;gx++) {
+				const int image_x0 = (gx * idim.innerX()) / subimage_grid_X;
+				const int image_y0 = (gy * idim.innerY()) / subimage_grid_Y;
+				image_f& sub = subimages[gy*subimage_grid_X + gx].value_image_i;
+				subimage_load(input_values, sub, image_x0, image_y0);
+			}}
+		}
+		void foreward_propagate_subimages_save(image_f& output_values) {
+			for(int gy=0;gy<subimage_grid_Y;gy++) {
+			for(int gx=0;gx<subimage_grid_X;gx++) {
+				const int image_x0 = (gx * idim.innerX()) / subimage_grid_X;
+				const int image_y0 = (gy * idim.innerY()) / subimage_grid_Y;
+				const image_f& sub = subimages[gy*subimage_grid_X + gx].value_image_o;
+				subimage_save_inner(output_values, sub, image_x0, image_y0);
+			}}
+		}
+
+		void backward_propagate_subimages_load(const image_f& output_error) {
+			for(int gy=0;gy<subimage_grid_Y;gy++) {
+			for(int gx=0;gx<subimage_grid_X;gx++) {
+				const int image_x0 = (gx * idim.innerX()) / subimage_grid_X;
+				const int image_y0 = (gy * idim.innerY()) / subimage_grid_Y;
+				image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_o;
+				subimage_load(output_error, sub, image_x0, image_y0);
+			}}
+		}
+		void backward_propagate_subimages_save(image_f& input_error) {
+			for(int gy=0;gy<subimage_grid_Y;gy++) {
+			for(int gx=0;gx<subimage_grid_X;gx++) {
+				const int image_x0 = (gx * idim.innerX()) / subimage_grid_X;
+				const int image_y0 = (gy * idim.innerY()) / subimage_grid_Y;
+				const image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_i;
+				subimage_save_inner(input_error, sub, image_x0, image_y0);
+			}}
+			for(int gy=0;gy<subimage_grid_Y;gy++) {
+			for(int gx=0;gx<subimage_grid_X;gx++) {
+				const int image_x0 = (gx * idim.innerX()) / subimage_grid_X;
+				const int image_y0 = (gy * idim.innerY()) / subimage_grid_Y;
+				const image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_i;
+				subimage_save_outer(input_error, sub, image_x0, image_y0);
+			}}
+		}
+
+		//TODO
+		void foreward_propagate_subimages_load_middle(const ae_layer& prev_layer) {}
+		void backward_propagate_subimages_load_middle(const ae_layer& next_layer) {}
 
 		// ============================================================
 		// network functions

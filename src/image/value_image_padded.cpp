@@ -16,34 +16,32 @@ namespace ML::image {
 		int Y = 0;// height of image.
 		int C = 0;// number of channels per pixel.
 	public:
-		// width of padding pixels along image perimeter.
-		int padX = 0;
-		int padY = 0;
+		// number of padding pixels along image perimeter.
+		int pad = 0;
 
 		value_image_padded_dimensions() = default;
-		value_image_padded_dimensions(int X, int Y, int C, int padX, int padY) {
-			this->X = X + padX*2;
-			this->Y = Y + padY*2;
+		value_image_padded_dimensions(int X, int Y, int C, int pad) {
+			this->X = X + pad*2;
+			this->Y = Y + pad*2;
 			this->C = C;
-			this->padX = padX;
-			this->padY = padY;
+			this->pad = pad;
 		}
 
 		int outerX() const { return X; }
 		int outerY() const { return Y; }
 		int outerC() const { return C; }
-		int innerX() const { return X - padX*2; }
-		int innerY() const { return Y - padY*2; }
+		int innerX() const { return X - pad*2; }
+		int innerY() const { return Y - pad*2; }
 		int innerC() const { return C; }
 		int outer_length() const { return outerX() * outerY() * outerC(); }
 		int inner_length() const { return innerX() * innerY() * innerC(); }
 
 		int get_offset_padded(const int x, const int y, const int c) const {
-			return (((y+padY)*X) + (x+padX))*C + c;
+			return (((y+pad)*X) + (x+pad))*C + c;
 		}
 
 		bool has_padding() const {
-			return (padX > 0) | (padY > 0);
+			return pad > 0;
 		}
 
 		bool equals(const value_image_padded_dimensions& other) const {
@@ -51,8 +49,15 @@ namespace ML::image {
 				(other.X == X) &
 				(other.Y == Y) &
 				(other.C == C) &
-				(other.padX == padX) &
-				(other.padY == padY)
+				(other.pad == pad)
+			);
+		}
+
+		bool is_within_inner_bounds(const int x, const int y, const int c) const {
+			return (
+				(x >= 0) & (x < innerX()) &
+				(y >= 0) & (y < innerY()) &
+				(c >= 0) & (c < innerC())
 			);
 		}
 	};
