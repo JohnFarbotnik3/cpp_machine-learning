@@ -217,6 +217,8 @@ and get rid of bp_targets altogether if the performance penalty is not too sever
 * try pinning particular subimages to particular cores to see if there is a performance benefit.
 * use both scanline images and padded images, instead of trying to shoehorn in maybe-padded images
 where strictly unpadded images should go. ("dim_t_pad", "dim_t_nopad", "image_f_pad", "image_f_nopad", ...)
+* experiment with not populating the padded area of subimages (as if unpadded images were used);
+this will prevent mixing across subimage boundaries but would simplfy code.
 
 
 > add to journal:

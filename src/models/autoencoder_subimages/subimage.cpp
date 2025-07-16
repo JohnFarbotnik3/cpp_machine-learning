@@ -3,6 +3,7 @@
 #include "patterns.cpp"
 #include <cassert>
 #include "src/utils/vector_util.cpp"
+#include "src/utils/random.cpp"
 
 namespace ML::models::autoencoder_subimage {
 	struct subimage {
@@ -28,20 +29,30 @@ namespace ML::models::autoencoder_subimage {
 			error_image_o	(odim)
 		{
 			assert(idim.inner_length() > 0);
-			assert(odim.inner_length() > 0);
-			assert(!odim.has_padding());
+			assert(odim.length() > 0);
 			fw_offsets = get_input_neuron_offsets_kernel(pattern, idim, odim);
-			const int n_weights = fw_offsets.kernel.size() * odim.inner_length();
+			const int n_weights = fw_offsets.kernel.size() * odim.length();
 			weights.resize(n_weights, 0.0f);
 			weights_error.resize(n_weights, 0.0f);
 		}
 
+		void init_model_parameters(int seed, float bias_mean, float bias_stddev, float weight_mean, float weight_stddev) {
+			std::mt19937 gen32 = utils::random::get_generator_32(seed);
+			std::normal_distribution distr_bias = utils::random::rand_normal<float>(bias_mean, bias_stddev);
+			std::normal_distribution distr_weight = utils::random::rand_normal<float>(weight_mean, weight_stddev);
+
+			const int WEIGHTS_PER_OUTPUT_NEURON = fw_offsets.kernel.size();
+			const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
+			for(int n=0;n<biases.data.size();n++) biases.data[n] = distr_bias(gen32);
+			for(int x=0;x<weights.size();x++) weights[x] = distr_weight(gen32) * mult;
+		}
+
 		void foreward_propagate() {
-			const dim_t idim = value_image_i.dim;
-			const dim_t odim = value_image_o.dim;
+			const padded_dim_t idim = value_image_i.dim;
+			const simple_dim_t odim = value_image_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = fw_offsets.kernel.size();
 
-			for(int out_n=0;out_n<odim.outer_length();out_n++) {
+			for(int out_n=0;out_n<odim.length();out_n++) {
 				const int kofs = fw_offsets.kernel_offsets.data[out_n];
 				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
 				float sum = biases.data[out_n];
@@ -55,14 +66,14 @@ namespace ML::models::autoencoder_subimage {
 		}
 
 		void backward_propagate() {
-			const dim_t idim = error_image_i.dim;
-			const dim_t odim = error_image_o.dim;
+			const padded_dim_t idim = error_image_i.dim;
+			const simple_dim_t odim = error_image_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = fw_offsets.kernel.size();
 			//const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
 			const float mult = 1.0f / WEIGHTS_PER_OUTPUT_NEURON;
 
 			error_image_i.clear();
-			for(int out_n=0;out_n<odim.outer_length();out_n++) {
+			for(int out_n=0;out_n<odim.length();out_n++) {
 				const int kofs = fw_offsets.kernel_offsets.data[out_n];
 				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const float signal_error_term = error_image_o.data[out_n] * activation_derivative(signal.data[out_n]);
@@ -82,9 +93,7 @@ namespace ML::models::autoencoder_subimage {
 				const float adjustment = std::clamp(biases_error.data[n] * adjustment_rate, -BIAS_ADJUSTMENT_LIMIT, +BIAS_ADJUSTMENT_LIMIT);
 				biases.data[n] = std::clamp(biases.data[n] + adjustment, -BIAS_LIMIT, +BIAS_LIMIT);
 			}
-			utils::vector_util::vec_fill(biases_error.data, 0.0f);
 		}
-
 		void apply_batch_error_weights(const float adjustment_rate) {
 			const float WEIGHT_LIMIT = 100.0f;
 			const float WEIGHT_ADJUSTMENT_LIMIT = 0.5f;
@@ -92,8 +101,10 @@ namespace ML::models::autoencoder_subimage {
 				const float adjustment = std::clamp(weights_error[x] * adjustment_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
 				weights[x] = std::clamp(weights[x] + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
 			}
-			utils::vector_util::vec_fill(weights, 0.0f);
 		}
+
+		void clear_batch_error_biases() { utils::vector_util::vec_fill(biases_error.data, 0.0f); }
+		void clear_batch_error_weights() { utils::vector_util::vec_fill(weights, 0.0f); }
 	};
 }
 

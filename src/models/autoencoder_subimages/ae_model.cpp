@@ -65,14 +65,10 @@ namespace ML::models::autoencoder_fixed {
 	public:
 		void init_model_parameters(int seed, float bias_mean, float bias_stddev, float weight_mean, float weight_stddev) {
 			std::mt19937 gen32 = utils::random::get_generator_32(seed);
-			std::normal_distribution distr_bias = utils::random::rand_normal<float>(bias_mean, bias_stddev);
-			std::normal_distribution distr_weight = utils::random::rand_normal<float>(weight_mean, weight_stddev);
-
+			std::uniform_int_distribution<int> distr = utils::random::rand_uniform_int<int>(INT_MIN, INT_MAX);
 			for(int z=0;z<layers.size();z++) {
-				auto& layer = layers[z];
-				const float mult = sqrtf(1.0f / layer.weights_per_output_neuron());
-				for(int n=0;n<layer.biases.size();n++) layer.biases[n] = distr_bias(gen32);
-				for(int x=0;x<layer.weights.size();x++) layer.weights[x] = distr_weight(gen32) * mult;
+				const int new_seed = distr(gen32);
+				layers[z].init_model_parameters(new_seed, bias_mean, bias_stddev, weight_mean, weight_stddev);
 			}
 		}
 
