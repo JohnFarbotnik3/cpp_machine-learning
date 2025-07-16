@@ -9,7 +9,6 @@ namespace ML::models::autoencoder_subimage {
 		const int A = pattern.A;
 		const int B = pattern.B;
 		const int N = pattern.N;
-		const int M = pattern.M;
 
 		input_neuron_offset_struct data;
 		vector<int>&	kernel  = data.kernel;
@@ -19,11 +18,6 @@ namespace ML::models::autoencoder_subimage {
 		assert(pattern.type != LAYER_TYPE::NONE);
 
 		if(pattern.type == LAYER_TYPE::DENSE) {
-			assert(A == 0);
-			assert(B == 0);
-			assert(N == 0);
-			assert(M == 0);
-
 			for(int iy=0;iy<idim.innerY();iy++) {
 			for(int ix=0;ix<idim.innerX();ix++) {
 			for(int ic=0;ic<idim.C;ic++) {
@@ -34,11 +28,6 @@ namespace ML::models::autoencoder_subimage {
 		}
 
 		if(pattern.type == LAYER_TYPE::ENCODE) {
-			assert(A > 0);
-			assert(B > 0);
-			assert(N == 0);
-			assert(M == 0);
-
 			for(int iy=0;iy<A;iy++) {
 			for(int ix=0;ix<A;ix++) {
 			for(int ic=0;ic<idim.C;ic++) {
@@ -57,12 +46,8 @@ namespace ML::models::autoencoder_subimage {
 		}
 
 		if(pattern.type == LAYER_TYPE::SPATIAL_MIX) {
-			assert(A == 0);
-			assert(B == 0);
-			assert(N > 0);
-			assert(M > 0);
 			assert(idim.C == odim.C);
-			const int p0 = (M/2) - (N/2);
+			const int p0 = (B/2) - (N/2);
 			const int p1 = p0 + N;
 			assert(p0 + idim.pad == 0);// assert that there is exactly the correct amount of padding.
 
@@ -76,18 +61,14 @@ namespace ML::models::autoencoder_subimage {
 			for(int oy=0;oy<odim.Y;oy++) {
 			for(int ox=0;ox<odim.X;ox++) {
 			for(int oc=0;oc<odim.C;oc++) {
-				const int ix0 = (ox - (ox%M)) + (M/2) - (N/2);
-				const int iy0 = (oy - (oy%M)) + (M/2) - (N/2);
+				const int ix0 = (ox / B) * B + (B/2) - (N/2);
+				const int iy0 = (oy / B) * B + (B/2) - (N/2);
 				const int ic0 = oc;
 				offsets.data[offsets.dim.get_offset(ox, oy, oc)] = idim.get_offset_padded(ix0, iy0, ic0) - origin;
 			}}}
 		}
 
 		if(pattern.type == LAYER_TYPE::ENCODE_MIX) {
-			assert(A > 0);
-			assert(B > 0);
-			assert(N > 0);
-			assert(M == 0);
 			assert(N % A == 0);
 			const int p0 = (A/2) - (N/2);
 			const int p1 = p0 + N;

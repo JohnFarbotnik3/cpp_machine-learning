@@ -31,7 +31,6 @@ namespace ML::models::autoencoder_subimage {
 			// determine amount of padding.
 			const int A = pattern.A;
 			const int B = pattern.B;
-			const int M = pattern.M;
 			const int N = pattern.N;
 			int pad = 0;
 			if(pattern.type == LAYER_TYPE::DENSE) {
@@ -43,8 +42,8 @@ namespace ML::models::autoencoder_subimage {
 			}
 			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) {
 				assert(odim.equals(idim));
-				assert((N - M) % 2 == 0);
-				pad = (N/2) - (M/2);
+				assert((N - B) % 2 == 0);
+				pad = (N/2) - (B/2);
 			}
 			if(pattern.type == LAYER_TYPE::ENCODE_MIX) {
 				assert((odim.X / B) == (idim.X / A));

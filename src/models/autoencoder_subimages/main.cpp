@@ -10,6 +10,8 @@
 #include "src/stats.cpp"
 #include "src/models/autoencoder_fixed/ae_model.cpp"
 
+// TODO - continue from here...
+
 /*
 debug build:
 g++ -std=c++23 -O2 -fsanitize=address -o "./src/models/autoencoder_fixed/main.elf" "./src/models/autoencoder_fixed/main.cpp"

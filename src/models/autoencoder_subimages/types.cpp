@@ -25,7 +25,7 @@ namespace ML::models::autoencoder_subimage {
 		ENCODE,
 		/*
 			mix pixels (channel-isolated) from centered-NxN squares
-			to centered-MxM squares, leaving image size the same.
+			to centered-BxB squares, leaving image size the same.
 		*/
 		SPATIAL_MIX,
 		/*
@@ -46,8 +46,21 @@ namespace ML::models::autoencoder_subimage {
 
 	struct layer_pattern {
 		LAYER_TYPE type;
-		int A,B;
-		int N,M;
+		int A,B,N;
+
+		static layer_pattern dense() {
+			return layer_pattern{ LAYER_TYPE::DENSE, 0, 0, 0 };
+		}
+		static layer_pattern spatial_mix(const int N, const int B) {
+			return layer_pattern{ LAYER_TYPE::SPATIAL_MIX, 0, B, N };
+		}
+		static layer_pattern encode(const int A, const int B) {
+			return layer_pattern{ LAYER_TYPE::ENCODE, A, B, 0 };
+		}
+		static layer_pattern encode_mix(const int A, const int B, const int N) {
+			return layer_pattern{ LAYER_TYPE::ENCODE_MIX, A, B, N };
+		}
+
 	};
 
 	struct fw_target { float weight=0.0f; };
