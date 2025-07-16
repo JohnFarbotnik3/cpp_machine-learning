@@ -2,14 +2,19 @@
 #ifndef F_ae_subimage_types
 #define F_ae_subimage_types
 
+#include <vector>
+#include "src/image/value_image_lines.cpp"
 #include "src/image/value_image_padded.cpp"
 
 namespace ML::models::autoencoder_subimage {
-	using namespace ML::image;
-	using image_f = ML::image::value_image_padded<float>;
-	using image_i = ML::image::value_image_padded<int>;
-	using iter_t = ML::image::value_image_padded_iterator;
-	using dim_t = ML::image::value_image_padded_dimensions;
+	//using namespace ML::image;
+	using std::vector;
+	using padded_image_f = ML::image::value_image_padded::value_image_padded<float>;
+	using padded_image_i = ML::image::value_image_padded::value_image_padded<int>;
+	using padded_dim_t = ML::image::value_image_padded::value_image_padded_dimensions;
+	using simple_image_f = ML::image::value_image_lines::value_image_lines<float>;
+	using simple_image_i = ML::image::value_image_lines::value_image_lines<int>;
+	using simple_dim_t = ML::image::value_image_lines::value_image_lines_dimensions;
 
 	enum LAYER_TYPE {
 		NONE,
@@ -52,11 +57,11 @@ namespace ML::models::autoencoder_subimage {
 		vector<fw_target> targets;
 	};
 	struct bp_target_list {
-		image_i intervals;// postfix-intervals of targets belonging to each input-neuron.
+		padded_image_i intervals;// postfix-intervals of targets belonging to each input-neuron.
 		vector<bp_target> targets;
 	};
 
-	struct neuron_offset_struct {
+	struct input_neuron_offset_struct {
 		/*
 			each output-neuron reads from a similar arrangement of input-values (for example, an NxN square);
 			this arrangement is stored as a re-usable kernel of offsets.
@@ -66,7 +71,7 @@ namespace ML::models::autoencoder_subimage {
 			each output-neuron may read from a different area of the input-image;
 			these offsets are meant to be combined with the kernel to get input-value indices.
 		*/
-		image_i kernel_offsets;
+		simple_image_i kernel_offsets;
 	};
 
 	float activation_func(const float value) {

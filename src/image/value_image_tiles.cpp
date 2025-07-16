@@ -13,8 +13,10 @@
 	NOTE: this namespace assumes that image-data is in row-major form
 	starting from bottom-left corner, and that RGBA values are interleaved.
 */
-namespace ML::image {
+namespace ML::image::value_image_tiles {
 	using std::vector;
+	using ML::image::value_image_lines::value_image_lines_iterator;
+	using ML::image::value_image_lines::value_image_lines_dimensions;
 
 	// TODO - remove dependence on "value_image_iterator".
 	/*
@@ -116,7 +118,7 @@ namespace ML::image {
 		*/
 		void setup_outer_iterator() {
 			outer_iterator = value_image_lines_iterator(
-				X/TX, Y/TY, C/TC,
+				value_image_lines_dimensions(X/TX, Y/TY, C/TC),
 				x0/TX, x1/TX + (x1%TX != 0 ? 1 : 0),
 				y0/TY, y1/TY + (y1%TY != 0 ? 1 : 0),
 				c0/TC, c1/TC + (c1%TC != 0 ? 1 : 0)
@@ -133,7 +135,7 @@ namespace ML::image {
 			int ty = outer.y * TY;
 			int tc = outer.c * TC;
 			inner_iterator = value_image_lines_iterator(
-				TX, TY, TC,
+				value_image_lines_dimensions(TX, TY, TC),
 				std::max(x0-tx, 0), std::min(x1-tx, TX),
 				std::max(y0-ty, 0), std::min(y1-ty, TY),
 				std::max(c0-tc, 0), std::min(c1-tc, TC)

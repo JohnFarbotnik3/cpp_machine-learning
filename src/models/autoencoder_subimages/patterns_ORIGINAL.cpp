@@ -5,13 +5,13 @@
 namespace ML::models::autoencoder_subimage {
 	using std::vector;
 
-	neuron_offset_struct get_input_neuron_offsets_kernel(const layer_pattern pattern, const dim_t idim, const dim_t odim) {
+	input_neuron_offset_struct get_input_neuron_offsets_kernel(const layer_pattern pattern, const dim_t idim, const dim_t odim) {
 		const int A = pattern.A;
 		const int B = pattern.B;
 		const int N = pattern.N;
 		const int M = pattern.M;
 
-		neuron_offset_struct data;
+		input_neuron_offset_struct data;
 		vector<int>&	kernel  = data.kernel;
 		image_i&		offsets = data.kernel_offsets;
 		offsets = image_i(odim);
@@ -115,7 +115,7 @@ namespace ML::models::autoencoder_subimage {
 		return data;
 	}
 
-	fw_target_list init_fw_targets(const neuron_offset_struct& offset_struct, const dim_t odim) {
+	fw_target_list init_fw_targets(const input_neuron_offset_struct& offset_struct, const dim_t odim) {
 		const vector<int>&	kernel = offset_struct.kernel;
 		const vector<int>&	kernel_offsets = offset_struct.kernel_offsets.data;
 		fw_target_list list;
@@ -131,7 +131,7 @@ namespace ML::models::autoencoder_subimage {
 		return list;
 	}
 
-	bp_target_list init_bp_targets(const neuron_offset_struct& offset_struct, const dim_t idim, const dim_t odim) {
+	bp_target_list init_bp_targets(const input_neuron_offset_struct& offset_struct, const dim_t idim, const dim_t odim) {
 		const vector<int>&	kernel = offset_struct.kernel;
 		const vector<int>&	kernel_offsets = offset_struct.kernel_offsets.data;
 		bp_target_list list;
@@ -176,7 +176,7 @@ namespace ML::models::autoencoder_subimage {
 		return list;
 	}
 
-	void sync_weights_fw_to_bp(const neuron_offset_struct& offset_struct, const dim_t idim, const dim_t odim, const fw_target_list& fw_targets, bp_target_list& bp_targets) {
+	void sync_weights_fw_to_bp(const input_neuron_offset_struct& offset_struct, const dim_t idim, const dim_t odim, const fw_target_list& fw_targets, bp_target_list& bp_targets) {
 		// initialize array of target interval start pointers.
 		vector<int> ptrs(idim.outer_length());
 		int b = 0;
@@ -200,7 +200,7 @@ namespace ML::models::autoencoder_subimage {
 		}}}
 	}
 
-	void sync_weights_bp_to_fw(const neuron_offset_struct& offset_struct, const dim_t idim, const dim_t odim, fw_target_list& fw_targets, const bp_target_list& bp_targets) {
+	void sync_weights_bp_to_fw(const input_neuron_offset_struct& offset_struct, const dim_t idim, const dim_t odim, fw_target_list& fw_targets, const bp_target_list& bp_targets) {
 		// initialize array of target interval start pointers.
 		vector<int> ptrs(idim.outer_length());
 		int b = 0;

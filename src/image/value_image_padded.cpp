@@ -1,21 +1,21 @@
 
-#ifndef F_image_value
-#define F_image_value
+#ifndef F_value_image_padded
+#define F_value_image_padded
 
 #include <algorithm>
 #include <cassert>
 #include <vector>
 #include "file_image.cpp"
 
-namespace ML::image {
+namespace ML::image::value_image_padded {
 	using std::vector;
 
 	struct value_image_padded_dimensions {
 	private:
 		int X = 0;// width of image.
 		int Y = 0;// height of image.
-		int C = 0;// number of channels per pixel.
 	public:
+		int C = 0;// number of channels per pixel.
 		// number of padding pixels along image perimeter.
 		int pad = 0;
 
@@ -29,12 +29,10 @@ namespace ML::image {
 
 		int outerX() const { return X; }
 		int outerY() const { return Y; }
-		int outerC() const { return C; }
 		int innerX() const { return X - pad*2; }
 		int innerY() const { return Y - pad*2; }
-		int innerC() const { return C; }
-		int outer_length() const { return outerX() * outerY() * outerC(); }
-		int inner_length() const { return innerX() * innerY() * innerC(); }
+		int outer_length() const { return outerX() * outerY() * C; }
+		int inner_length() const { return innerX() * innerY() * C; }
 
 		int get_offset_padded(const int x, const int y, const int c) const {
 			return (((y+pad)*X) + (x+pad))*C + c;
@@ -53,11 +51,10 @@ namespace ML::image {
 			);
 		}
 
-		bool is_within_inner_bounds(const int x, const int y, const int c) const {
+		bool is_within_inner_bounds(const int x, const int y) const {
 			return (
 				(x >= 0) & (x < innerX()) &
-				(y >= 0) & (y < innerY()) &
-				(c >= 0) & (c < innerC())
+				(y >= 0) & (y < innerY())
 			);
 		}
 	};
@@ -101,7 +98,7 @@ namespace ML::image {
 			assert(c0 >= 0);
 			assert(x1 <= dim.innerX());
 			assert(y1 <= dim.innerY());
-			assert(c1 <= dim.innerC());
+			assert(c1 <= dim.C);
 		}
 
 		int length() {
@@ -129,7 +126,7 @@ namespace ML::image {
 		int sy0 = 0, sy1 = 0;
 
 		value_image_padded() = default;
-		value_image_padded(value_image_padded_dimensions dim) : dim(dim), data(dim.outer_length(), 0) {}
+		value_image_padded(const value_image_padded_dimensions dim) : dim(dim), data(dim.outer_length(), 0) {}
 
 		void clear() {
 			for(int x=0;x<data.size();x++) data[x] = 0;
@@ -148,7 +145,7 @@ namespace ML::image {
 		// assert that image-area and sample-area match.
 		assert((sample.sx1 - sample.sx0) == image.X);
 		assert((sample.sy1 - sample.sy0) == image.Y);
-		assert(sample.dim.innerC() == image.C);
+		assert(sample.dim.C == image.C);
 		sample.clear();
 
 		value_image_padded_iterator sample_iter = sample.get_iterator(
@@ -328,7 +325,7 @@ namespace ML::image {
 		file_image image;
 		image.X = sample.dim.innerX();
 		image.Y = sample.dim.innerY();
-		image.C = sample.dim.innerC();
+		image.C = sample.dim.C;
 		image.data.resize(image.X * image.Y * image.C);
 
 		value_image_padded_iterator sample_iter = clamp_to_sample_area ? sample.get_iterator(

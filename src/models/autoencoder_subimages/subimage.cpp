@@ -6,19 +6,19 @@
 
 namespace ML::models::autoencoder_subimage {
 	struct subimage {
-		image_f biases;
-		image_f biases_error;	// accumulated error in biases during minibatch.
-		image_f signal;			// image of signal values - used for backprop.
-		image_f value_image_i;	// input values - populated externally.
-		image_f value_image_o;
-		image_f error_image_i;
-		image_f error_image_o;	// output-side error - populated externally.
-		neuron_offset_struct fw_offsets;
+		simple_image_f biases;
+		simple_image_f biases_error;	// accumulated error in biases during minibatch.
+		simple_image_f signal;			// image of signal values - used for backprop.
+		padded_image_f value_image_i;	// input values - populated externally.
+		simple_image_f value_image_o;
+		padded_image_f error_image_i;
+		simple_image_f error_image_o;	// output-side error - populated externally.
+		input_neuron_offset_struct fw_offsets;
 		vector<float> weights;
 		vector<float> weights_error;
 
 		subimage() = default;
-		subimage(const dim_t idim, const dim_t odim, const layer_pattern pattern) :
+		subimage(const padded_dim_t idim, const simple_dim_t odim, const layer_pattern pattern) :
 			biases			(odim),
 			biases_error	(odim),
 			signal			(odim),

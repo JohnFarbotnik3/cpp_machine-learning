@@ -1,75 +1,14 @@
 
-#ifndef F_image_value
-#define F_image_value
+#ifndef F_value_image_lines
+#define F_value_image_lines
 
 #include <algorithm>
 #include <cassert>
 #include <vector>
 #include "file_image.cpp"
 
-namespace ML::image {
+namespace ML::image::value_image_lines {
 	using std::vector;
-
-	/* iterator for scanline images. */
-	struct value_image_lines_iterator {
-		// image dimensions.
-		int X,Y,C;
-		// current position.
-		int x,y,c;
-		// image bounds - area to iterate through.
-		int x0,x1;
-		int y0,y1;
-		int c0,c1;
-		// index in image data.
-		int i;
-		// iterator steps remaining.
-		int irem;
-
-		value_image_lines_iterator() = default;
-		value_image_lines_iterator(
-			int X, int Y, int C,
-			int x0, int x1,
-			int y0, int y1,
-			int c0, int c1
-		) {
-			this->X = X;
-			this->Y = Y;
-			this->C = C;
-			this->x0 = x0;
-			this->x1 = x1;
-			this->y0 = y0;
-			this->y1 = y1;
-			this->c0 = c0;
-			this->c1 = c1;
-			this->x = x0;
-			this->y = y0;
-			this->c = c0;
-			this->i = ((y * X) + x) * C + c;
-			this->irem = length();
-			// assertions.
-			assert(x0 >= 0);
-			assert(y0 >= 0);
-			assert(c0 >= 0);
-			assert(x1 <= X);
-			assert(y1 <= Y);
-			assert(c1 <= C);
-		}
-
-		int length() {
-			return std::max(x1-x0, 0) * std::max(y1-y0, 0) * std::max(c1-c0, 0);
-		}
-		bool has_next() {
-			return irem > 0;
-		}
-		int next() {
-			irem--;
-			c++;
-			if(c >= c1) { c=c0; x++; }
-			if(x >= x1) { x=x0; y++; }
-			i = ((y*X) + x)*C + c;
-			return i;
-		}
-	};
 
 	struct value_image_lines_dimensions {
 		int X = 0;// width of image.
@@ -91,31 +30,84 @@ namespace ML::image {
 			);
 		}
 
-		value_image_lines_iterator get_iterator(int x0, int x1, int y0, int y1, int c0, int c1) const {
-			return value_image_lines_iterator(X, Y, C, x0, x1, y0, y1, c0, c1);
+		bool equals(const value_image_lines_dimensions& other) const {
+			return (
+				(other.X == X) &
+				(other.Y == Y) &
+				(other.C == C)
+			);
 		}
-		value_image_lines_iterator get_iterator() const {
-			return value_image_lines_iterator(X, Y, C, 0, X, 0, Y, 0, C);
+	};
+
+	/* iterator for scanline images. */
+	struct value_image_lines_iterator {
+		// image dimensions.
+		value_image_lines_dimensions dim;
+		// current position.
+		int x,y,c;
+		// image bounds - area to iterate through.
+		int x0,x1;
+		int y0,y1;
+		int c0,c1;
+		// index in image data.
+		int i;
+		// iterator steps remaining.
+		int irem;
+
+		value_image_lines_iterator() = default;
+		value_image_lines_iterator(
+			value_image_lines_dimensions dim,
+			int x0, int x1,
+			int y0, int y1,
+			int c0, int c1
+		) {
+			this->dim = dim;
+			this->x0 = x0;
+			this->x1 = x1;
+			this->y0 = y0;
+			this->y1 = y1;
+			this->c0 = c0;
+			this->c1 = c1;
+			this->x = x0;
+			this->y = y0;
+			this->c = c0;
+			this->i = dim.get_offset(x, y, c);
+			this->irem = length();
+			// assertions.
+			assert(x0 >= 0);
+			assert(y0 >= 0);
+			assert(c0 >= 0);
+			assert(x1 <= dim.X);
+			assert(y1 <= dim.Y);
+			assert(c1 <= dim.C);
+		}
+
+		int length() {
+			return std::max(x1-x0, 0) * std::max(y1-y0, 0) * std::max(c1-c0, 0);
+		}
+		bool has_next() {
+			return irem > 0;
+		}
+		int next() {
+			irem--;
+			c++;
+			if(c >= c1) { c=c0; x++; }
+			if(x >= x1) { x=x0; y++; }
+			i = dim.get_offset(x, y, c);
+			return i;
 		}
 	};
 
 	template<class T>
 	struct value_image_lines {
 		vector<T> data;
-		int X = 0;// width.
-		int Y = 0;// height.
-		int C = 0;// number of channels.
+		value_image_lines_dimensions dim;
 		// sample bounds.
 		int x0,x1;
 		int y0,y1;
 
-		value_image_lines(int X, int Y, int C) {
-			this->X = X;
-			this->Y = Y;
-			this->C = C;
-			this->data.resize(X * Y * C);
-			clear();
-		}
+		value_image_lines() = default;
+		value_image_lines(const value_image_lines_dimensions dim) : dim(dim), data(dim.length(), 0) {}
 
 		void clear() {
 			for(int x=0;x<data.size();x++) data[x] = 0;
@@ -126,7 +118,7 @@ namespace ML::image {
 			int y0, int y1,
 			int c0, int c1
 		) const {
-			return value_image_lines_iterator(X, Y, C, x0, x1, y0, y1, c0, c1);
+			return value_image_lines_iterator(dim, x0, x1, y0, y1, c0, c1);
 		}
 	};
 
@@ -134,7 +126,8 @@ namespace ML::image {
 		// assert that image-area and sample-area match.
 		assert((sample.x1 - sample.x0) == image.X);
 		assert((sample.y1 - sample.y0) == image.Y);
-		assert(sample.C == image.C);
+		assert(sample.dim.C == image.C);
+		sample.clear();
 
 		value_image_lines_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
@@ -155,6 +148,8 @@ namespace ML::image {
 	}
 
 	void sample_area_nearest_neighbour(value_image_lines<float>& sample, const file_image& image) {
+		sample.clear();
+
 		value_image_lines_iterator sample_iter = sample.get_iterator(
 			sample.x0, sample.x1,
 			sample.y0, sample.y1,
@@ -174,11 +169,13 @@ namespace ML::image {
 	}
 
 	void sample_area_linear(value_image_lines<float>& sample, const file_image& image) {
+		sample.clear();
+
 		// compute float conversions between sample coordinates to image coordinates.
-		vector<int> floor_mx(sample.X+2);
-		vector<int> floor_my(sample.Y+2);
-		vector<int> ceil__mx(sample.X+2);
-		vector<int> ceil__my(sample.Y+2);
+		vector<int> floor_mx(sample.dim.X+2);
+		vector<int> floor_my(sample.dim.Y+2);
+		vector<int> ceil__mx(sample.dim.X+2);
+		vector<int> ceil__my(sample.dim.Y+2);
 		vector<float> image_to_sample_x(image.X+2);
 		vector<float> image_to_sample_y(image.Y+2);
 		int max_int = std::max(image.X+2, image.Y+2);
@@ -262,12 +259,13 @@ namespace ML::image {
 		when computing error.
 	*/
 	void generate_sample_image(value_image_lines<float>& sample, const file_image& image) {
-		sample.clear();
+		const int sample_X = sample.dim.X;
+		const int sample_Y = sample.dim.Y;
 
 		// if loaded image is smaller than sample area, then copy.
-		if(image.X <= sample.X && image.Y <= sample.Y) {
-			int remaining_w = sample.X - image.X;
-			int remaining_h = sample.Y - image.Y;
+		if(image.X <= sample_X && image.Y <= sample_Y) {
+			int remaining_w = sample_X - image.X;
+			int remaining_h = sample_Y - image.Y;
 			sample.x0 = remaining_w/2;
 			sample.y0 = remaining_h/2;
 			sample.x1 = sample.x0 + image.X;
@@ -278,23 +276,23 @@ namespace ML::image {
 		// if loaded image is larger than sample area, then scale down.
 		else {
 			// determine which dimension to scale against.
-			float iw_over_sw = float(image.X) / float(sample.X);
-			float ih_over_sh = float(image.Y) / float(sample.Y);
+			float iw_over_sw = float(image.X) / float(sample_X);
+			float ih_over_sh = float(image.Y) / float(sample_Y);
 			float scale_factor = 1;
 			if(iw_over_sw >= ih_over_sh) {
 				// scale to sample width.
-				int scaled_h = std::min(((image.Y * sample.X) / image.X), sample.Y);
+				int scaled_h = std::min(((image.Y * sample_X) / image.X), sample_Y);
 				sample.x0 = 0;
-				sample.x1 = sample.X;
-				int remaining_h = sample.Y  - scaled_h;
+				sample.x1 = sample_X;
+				int remaining_h = sample_Y  - scaled_h;
 				sample.y0 = remaining_h / 2;
 				sample.y1 = (sample.y0 + scaled_h);
 			} else {
 				// scale to sample height.
-				int scaled_w = std::min(((image.X * sample.Y) / image.Y), sample.X);
+				int scaled_w = std::min(((image.X * sample_Y) / image.Y), sample_X);
 				sample.y0 = 0;
-				sample.y1 = sample.Y;
-				int remaining_w = sample.X  - scaled_w;
+				sample.y1 = sample_Y;
+				int remaining_w = sample_X  - scaled_w;
 				sample.x0 = remaining_w / 2;
 				sample.x1 = (sample.x0 + scaled_w);
 			}
@@ -306,9 +304,9 @@ namespace ML::image {
 
 	file_image to_file_image(value_image_lines<float>& sample, bool clamp_to_sample_area) {
 		file_image image;
-		image.X = sample.X;
-		image.Y = sample.Y;
-		image.C = sample.C;
+		image.X = sample.dim.X;
+		image.Y = sample.dim.Y;
+		image.C = sample.dim.C;
 		image.data.resize(image.X * image.Y * image.C);
 
 		value_image_lines_iterator sample_iter = clamp_to_sample_area ? sample.get_iterator(

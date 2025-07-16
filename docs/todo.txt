@@ -179,6 +179,7 @@ and some things will be made simpler by having a *fixed* number of targets for e
 
 
 > debug autoencoder.
+- remove sample-image bounds from image types, and make into a seperate struct.
 - add config file parsing (newline delimited KEY=VALUE pairs).
 * work on model ergonomics first:
 	- config files: commandline parameters in text file.
@@ -214,6 +215,8 @@ simple scatter-style backprop to quantify difference.
 it would be strongly preferable to use simple backprop
 and get rid of bp_targets altogether if the performance penalty is not too severe.
 * try pinning particular subimages to particular cores to see if there is a performance benefit.
+* use both scanline images and padded images, instead of trying to shoehorn in maybe-padded images
+where strictly unpadded images should go. ("dim_t_pad", "dim_t_nopad", "image_f_pad", "image_f_nopad", ...)
 
 
 > add to journal:

@@ -1,5 +1,4 @@
 
-#include <chrono>
 #include <climits>
 #include <thread>
 #include <vector>
@@ -9,7 +8,7 @@
 namespace ML::models::autoencoder_fixed {
 	using std::vector;
 	using namespace utils::vector_util;
-	using namespace ML::image;
+	using namespace ML::image::value_image_lines;
 
 	/*
 		each layer condenses or expands the previous layer from AxA squares to BxB squares.

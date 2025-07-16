@@ -9,7 +9,7 @@ namespace ML::models::autoencoder_subimage {
 		image_f biases_error;// accumulated error in biases during minibatch.
 		image_f signal;// image of signal values - used for backprop.
 		image_f output;// image of output values - used for backprop.
-		neuron_offset_struct fw_offsets;
+		input_neuron_offset_struct fw_offsets;
 		fw_target_list fw_targets;
 		bp_target_list bp_targets;
 

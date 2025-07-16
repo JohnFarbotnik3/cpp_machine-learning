@@ -5,16 +5,16 @@
 namespace ML::models::autoencoder_subimage {
 	using std::vector;
 
-	neuron_offset_struct get_input_neuron_offsets_kernel(const layer_pattern pattern, const dim_t idim, const dim_t odim) {
+	input_neuron_offset_struct get_input_neuron_offsets_kernel(const layer_pattern pattern, const padded_dim_t idim, const simple_dim_t odim) {
 		const int A = pattern.A;
 		const int B = pattern.B;
 		const int N = pattern.N;
 		const int M = pattern.M;
 
-		neuron_offset_struct data;
+		input_neuron_offset_struct data;
 		vector<int>&	kernel  = data.kernel;
-		image_i&		offsets = data.kernel_offsets;
-		offsets = image_i(odim);
+		simple_image_i&	offsets = data.kernel_offsets;
+		offsets = simple_image_i(odim);
 
 		assert(pattern.type != LAYER_TYPE::NONE);
 
@@ -26,7 +26,7 @@ namespace ML::models::autoencoder_subimage {
 
 			for(int iy=0;iy<idim.innerY();iy++) {
 			for(int ix=0;ix<idim.innerX();ix++) {
-			for(int ic=0;ic<idim.innerC();ic++) {
+			for(int ic=0;ic<idim.C;ic++) {
 				kernel.push_back(idim.get_offset_padded(ix, iy, ic));
 			}}}
 
@@ -41,18 +41,18 @@ namespace ML::models::autoencoder_subimage {
 
 			for(int iy=0;iy<A;iy++) {
 			for(int ix=0;ix<A;ix++) {
-			for(int ic=0;ic<idim.innerC();ic++) {
+			for(int ic=0;ic<idim.C;ic++) {
 				kernel.push_back(idim.get_offset_padded(ix, iy, ic));
 			}}}
 
 			const int origin = idim.get_offset_padded(0, 0, 0);
-			for(int oy=0;oy<odim.innerY();oy++) {
-			for(int ox=0;ox<odim.innerX();ox++) {
-			for(int oc=0;oc<odim.innerC();oc++) {
+			for(int oy=0;oy<odim.Y;oy++) {
+			for(int ox=0;ox<odim.X;ox++) {
+			for(int oc=0;oc<odim.C;oc++) {
 				const int ix0 = (ox / B) * A;
 				const int iy0 = (oy / B) * A;
 				const int ic0 = 0;
-				offsets.data[offsets.dim.get_offset_padded(ox, oy, oc)] = idim.get_offset_padded(ix0, iy0, ic0) - origin;
+				offsets.data[offsets.dim.get_offset(ox, oy, oc)] = idim.get_offset_padded(ix0, iy0, ic0) - origin;
 			}}}
 		}
 
@@ -61,11 +61,10 @@ namespace ML::models::autoencoder_subimage {
 			assert(B == 0);
 			assert(N > 0);
 			assert(M > 0);
-			assert(idim.innerC() == odim.innerC());
+			assert(idim.C == odim.C);
 			const int p0 = (M/2) - (N/2);
 			const int p1 = p0 + N;
-			assert(p0 + idim.padX == 0);// assert that there is exactly the correct amount of padding.
-			assert(p0 + idim.padY == 0);
+			assert(p0 + idim.pad == 0);// assert that there is exactly the correct amount of padding.
 
 			for(int iy=p0;iy<p1;iy++) {
 			for(int ix=p0;ix<p1;ix++) {
@@ -74,13 +73,13 @@ namespace ML::models::autoencoder_subimage {
 			}}
 
 			const int origin = idim.get_offset_padded(p0, p0, 0);
-			for(int oy=0;oy<odim.innerY();oy++) {
-			for(int ox=0;ox<odim.innerX();ox++) {
-			for(int oc=0;oc<odim.innerC();oc++) {
+			for(int oy=0;oy<odim.Y;oy++) {
+			for(int ox=0;ox<odim.X;ox++) {
+			for(int oc=0;oc<odim.C;oc++) {
 				const int ix0 = (ox - (ox%M)) + (M/2) - (N/2);
 				const int iy0 = (oy - (oy%M)) + (M/2) - (N/2);
 				const int ic0 = oc;
-				offsets.data[offsets.dim.get_offset_padded(ox, oy, oc)] = idim.get_offset_padded(ix0, iy0, ic0) - origin;
+				offsets.data[offsets.dim.get_offset(ox, oy, oc)] = idim.get_offset_padded(ix0, iy0, ic0) - origin;
 			}}}
 		}
 
@@ -92,23 +91,22 @@ namespace ML::models::autoencoder_subimage {
 			assert(N % A == 0);
 			const int p0 = (A/2) - (N/2);
 			const int p1 = p0 + N;
-			assert(p0 + idim.padX == 0);// assert that there is exactly the correct amount of padding.
-			assert(p0 + idim.padY == 0);
+			assert(p0 + idim.pad == 0);// assert that there is exactly the correct amount of padding.
 
 			for(int iy=p0;iy<p1;iy++) {
 			for(int ix=p0;ix<p1;ix++) {
-			for(int ic=0;ic<idim.innerC();ic++) {
+			for(int ic=0;ic<idim.C;ic++) {
 				kernel.push_back(idim.get_offset_padded(ix, iy, ic));
 			}}}
 
 			const int origin = idim.get_offset_padded(p0, p0, 0);
-			for(int oy=0;oy<odim.innerY();oy++) {
-			for(int ox=0;ox<odim.innerX();ox++) {
-			for(int oc=0;oc<odim.innerC();oc++) {
+			for(int oy=0;oy<odim.Y;oy++) {
+			for(int ox=0;ox<odim.X;ox++) {
+			for(int oc=0;oc<odim.C;oc++) {
 				const int ix0 = (ox / B) * A + (A/2) - (N/2);
 				const int iy0 = (oy / B) * A + (A/2) - (N/2);
 				const int ic0 = 0;
-				offsets.data[offsets.dim.get_offset_padded(ox, oy, oc)] = idim.get_offset_padded(ix0, iy0, ic0) - origin;
+				offsets.data[offsets.dim.get_offset(ox, oy, oc)] = idim.get_offset_padded(ix0, iy0, ic0) - origin;
 			}}}
 		}
 
