@@ -55,6 +55,9 @@ namespace ML::models::autoencoder_subimage {
 			// create grid of subimages.
 			subidim = padded_dim_t(idim.X/grid_X, idim.Y/grid_Y, idim.C, pad);
 			subodim = simple_dim_t(odim.X/grid_X, odim.Y/grid_Y, odim.C);
+			printf("gx=%i, gy=%i, idim={%s}, odim={%s}\n", grid_X, grid_Y, idim.toString().c_str(), odim.toString().c_str());
+			printf("subidim: %s\n", subidim.toString().c_str());
+			printf("subodim: %s\n", subodim.toString().c_str());
 			for(int y=0;y<grid_Y;y++) {
 			for(int x=0;x<grid_X;x++) {
 				subimages.push_back(subimage(subidim, subodim, pattern));
@@ -65,20 +68,42 @@ namespace ML::models::autoencoder_subimage {
 		// subimage manipulation.
 		// ------------------------------------------------------------
 
-		static void subimage_load(const simple_image_f& img, padded_image_f& sub, const int image_x0, const int image_y0) {
+		static void subimage_load(const simple_image_f& img, simple_image_f& sub, const int image_x0, const int image_y0) {
+			const simple_dim_t imgdim = img.dim;
+			const simple_dim_t subdim = sub.dim;
+			const int ch = img.dim.C;
+			      float* subdata = sub.data.data();
+			const float* imgdata = img.data.data();
+
+			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.X;
+			for(int sy=0;sy<subdim.Y;sy++) {
+				const int i0 = imgdim.get_offset(image_x0, image_y0+sy, 0);
+				const int s0 = subdim.get_offset(0, sy, 0);
+				memcpy(subdata+s0, imgdata+i0, ROW_SZ);
+			}
+		}
+		static void subimage_load_inner(const simple_image_f& img, padded_image_f& sub, const int image_x0, const int image_y0) {
 			const simple_dim_t imgdim = img.dim;
 			const padded_dim_t subdim = sub.dim;
 			const int ch = img.dim.C;
 			      float* subdata = sub.data.data();
 			const float* imgdata = img.data.data();
 
-			// load inner part of subimage.
 			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.innerX();
 			for(int sy=0;sy<subdim.innerY();sy++) {
 				const int i0 = imgdim.get_offset(image_x0, image_y0+sy, 0);
 				const int s0 = subdim.get_offset_padded(0, sy, 0);
 				memcpy(subdata+s0, imgdata+i0, ROW_SZ);
 			}
+		}
+		static void subimage_load_outer(const simple_image_f& img, padded_image_f& sub, const int image_x0, const int image_y0) {
+			if(sub.dim.pad == 0) return;// skip if no padding.
+
+			const simple_dim_t imgdim = img.dim;
+			const padded_dim_t subdim = sub.dim;
+			const int ch = img.dim.C;
+			      float* subdata = sub.data.data();
+			const float* imgdata = img.data.data();
 
 			// load padding part of subimage.
 			const int pad = subdim.pad;
@@ -96,19 +121,19 @@ namespace ML::models::autoencoder_subimage {
 				}
 			}}
 		}
-		static void subimage_load(const simple_image_f& img, simple_image_f& sub, const int image_x0, const int image_y0) {
+		static void subimage_save(simple_image_f& img, const simple_image_f& sub, const int image_x0, const int image_y0) {
 			const simple_dim_t imgdim = img.dim;
 			const simple_dim_t subdim = sub.dim;
 			const int ch = img.dim.C;
-			      float* subdata = sub.data.data();
-			const float* imgdata = img.data.data();
+			const float* subdata = sub.data.data();
+			      float* imgdata = img.data.data();
 
-			// load inner part of subimage.
+			// save inner part of subimage.
 			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.X;
 			for(int sy=0;sy<subdim.Y;sy++) {
 				const int i0 = imgdim.get_offset(image_x0, image_y0+sy, 0);
 				const int s0 = subdim.get_offset(0, sy, 0);
-				memcpy(subdata+s0, imgdata+i0, ROW_SZ);
+				memcpy(imgdata+i0, subdata+s0, ROW_SZ);
 			}
 		}
 		static void subimage_save_inner(simple_image_f& img, const padded_image_f& sub, const int image_x0, const int image_y0) {
@@ -126,22 +151,9 @@ namespace ML::models::autoencoder_subimage {
 				memcpy(imgdata+i0, subdata+s0, ROW_SZ);
 			}
 		}
-		static void subimage_save_inner(simple_image_f& img, const simple_image_f& sub, const int image_x0, const int image_y0) {
-			const simple_dim_t imgdim = img.dim;
-			const simple_dim_t subdim = sub.dim;
-			const int ch = img.dim.C;
-			const float* subdata = sub.data.data();
-			      float* imgdata = img.data.data();
-
-			// save inner part of subimage.
-			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.X;
-			for(int sy=0;sy<subdim.Y;sy++) {
-				const int i0 = imgdim.get_offset(image_x0, image_y0+sy, 0);
-				const int s0 = subdim.get_offset(0, sy, 0);
-				memcpy(imgdata+i0, subdata+s0, ROW_SZ);
-			}
-		}
 		static void subimage_save_outer(simple_image_f& img, const padded_image_f& sub, const int image_x0, const int image_y0) {
+			if(sub.dim.pad == 0) return;// skip if no padding.
+
 			const simple_dim_t imgdim = img.dim;
 			const padded_dim_t subdim = sub.dim;
 			const int ch = img.dim.C;
@@ -168,27 +180,28 @@ namespace ML::models::autoencoder_subimage {
 		void foreward_propagate_subimages_load(const simple_image_f& input_values) {
 			for(int gy=0;gy<subimage_grid_Y;gy++) {
 			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * idim.X) / subimage_grid_X;
-				const int image_y0 = (gy * idim.Y) / subimage_grid_Y;
+				const int image_x0 = (gx * input_values.dim.X) / subimage_grid_X;
+				const int image_y0 = (gy * input_values.dim.Y) / subimage_grid_Y;
 				padded_image_f& sub = subimages[gy*subimage_grid_X + gx].value_image_i;
-				subimage_load(input_values, sub, image_x0, image_y0);
+				subimage_load_inner(input_values, sub, image_x0, image_y0);
+				subimage_load_outer(input_values, sub, image_x0, image_y0);
 			}}
 		}
 		void foreward_propagate_subimages_save(simple_image_f& output_values) {
 			for(int gy=0;gy<subimage_grid_Y;gy++) {
 			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * idim.X) / subimage_grid_X;
-				const int image_y0 = (gy * idim.Y) / subimage_grid_Y;
+				const int image_x0 = (gx * output_values.dim.X) / subimage_grid_X;
+				const int image_y0 = (gy * output_values.dim.Y) / subimage_grid_Y;
 				const simple_image_f& sub = subimages[gy*subimage_grid_X + gx].value_image_o;
-				subimage_save_inner(output_values, sub, image_x0, image_y0);
+				subimage_save(output_values, sub, image_x0, image_y0);
 			}}
 		}
 
 		void backward_propagate_subimages_load(const simple_image_f& output_error) {
 			for(int gy=0;gy<subimage_grid_Y;gy++) {
 			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * idim.X) / subimage_grid_X;
-				const int image_y0 = (gy * idim.Y) / subimage_grid_Y;
+				const int image_x0 = (gx * output_error.dim.X) / subimage_grid_X;
+				const int image_y0 = (gy * output_error.dim.Y) / subimage_grid_Y;
 				simple_image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_o;
 				subimage_load(output_error, sub, image_x0, image_y0);
 			}}
@@ -196,15 +209,15 @@ namespace ML::models::autoencoder_subimage {
 		void backward_propagate_subimages_save(simple_image_f& input_error) {
 			for(int gy=0;gy<subimage_grid_Y;gy++) {
 			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * idim.X) / subimage_grid_X;
-				const int image_y0 = (gy * idim.Y) / subimage_grid_Y;
+				const int image_x0 = (gx * input_error.dim.X) / subimage_grid_X;
+				const int image_y0 = (gy * input_error.dim.Y) / subimage_grid_Y;
 				const padded_image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_i;
 				subimage_save_inner(input_error, sub, image_x0, image_y0);
 			}}
 			for(int gy=0;gy<subimage_grid_Y;gy++) {
 			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * idim.X) / subimage_grid_X;
-				const int image_y0 = (gy * idim.Y) / subimage_grid_Y;
+				const int image_x0 = (gx * input_error.dim.X) / subimage_grid_X;
+				const int image_y0 = (gy * input_error.dim.Y) / subimage_grid_Y;
 				const padded_image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_i;
 				subimage_save_outer(input_error, sub, image_x0, image_y0);
 			}}
@@ -298,6 +311,32 @@ namespace ML::models::autoencoder_subimage {
 				subimages[x].clear_batch_error_biases();
 				subimages[x].clear_batch_error_weights();
 			}
+		}
+
+		// ============================================================
+		// stats helper functions.
+		// ------------------------------------------------------------
+
+		vector<float> get_biases() {
+			vector<float> arr(subimages[0].biases.data.size() * subimage_grid_X * subimage_grid_Y);
+			for(int y=0;y<subimage_grid_Y;y++) {
+			for(int x=0;x<subimage_grid_X;x++) {
+				const simple_image_f& biases = subimages[y*subimage_grid_X + x].biases;
+				const int i0 = (y*subimage_grid_X + x) * biases.data.size();
+				memcpy(arr.data()+i0, biases.data.data(), biases.data.size() * sizeof(float));
+			}}
+			return arr;
+		}
+
+		vector<float> get_weights() {
+			vector<float> arr(subimages[0].weights.size() * subimage_grid_X * subimage_grid_Y);
+			for(int y=0;y<subimage_grid_Y;y++) {
+			for(int x=0;x<subimage_grid_X;x++) {
+				const vector<float>& weights = subimages[y*subimage_grid_X + x].weights;
+				const int i0 = (y*subimage_grid_X + x) * weights.size();
+				memcpy(arr.data()+i0, weights.data(), weights.size() * sizeof(float));
+			}}
+			return arr;
 		}
 	};
 

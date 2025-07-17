@@ -18,44 +18,47 @@ namespace ML::models::autoencoder_subimage {
 		dimensions_t image_dimensions;
 		vector<ae_layer> layers;
 
-		void push_layer_dense		(const dimensions_t idim, const dimensions_t odim) {
+		void push_layer_dense				(const dimensions_t idim, const dimensions_t odim) {
 			assert(idim.length() > 0);
 			assert(odim.length() > 0);
 			layers.push_back(ae_layer(idim, odim, layer_pattern::dense(), 1, 1));
 		}
-		void push_layer_spatial_mix	(const dimensions_t idim, const dimensions_t odim, const int GX, const int GY, const int N, const int B) {
+		void push_layer_spatial_mix			(const dimensions_t idim, const int GX, const int GY, const int N, const int B) {
 			assert(idim.length() > 0);
-			assert(odim.length() > 0);
-			assert(odim.equals(idim));
+			const dimensions_t odim = idim;
 			layers.push_back(ae_layer(idim, odim, layer_pattern::spatial_mix(N, B), GX, GY));
 		}
-		void push_layer_encode		(const dimensions_t idim, dimensions_t odim, const int GX, const int GY, const int A, const int B, const int out_ch) {
+		dimensions_t push_layer_encode		(const dimensions_t idim, const int GX, const int GY, const int A, const int B, const int out_ch) {
+			assert(idim.length() > 0);
 			assert(idim.X % A == 0);
 			assert(idim.Y % A == 0);
+			dimensions_t odim;
+			odim.X = (idim.X / A) * B;
+			odim.Y = (idim.Y / A) * B;
+			odim.C = out_ch;
+			assert(odim.length() > 0);
 			assert(odim.X % B == 0);
 			assert(odim.Y % B == 0);
 			assert((idim.X / A) == (odim.X / B));
 			assert((idim.Y / A) == (odim.Y / B));
-			odim.X = (idim.X * B) / A;
-			odim.Y = (idim.Y * B) / A;
-			odim.C = out_ch;
-			assert(idim.length() > 0);
-			assert(odim.length() > 0);
 			layers.push_back(ae_layer(idim, odim, layer_pattern::encode(A, B), GX, GY));
+			return odim;
 		}
-		void push_layer_encode_mix	(const dimensions_t idim, dimensions_t odim, const int GX, const int GY, const int A, const int B, const int N, const int out_ch) {
+		dimensions_t push_layer_encode_mix	(const dimensions_t idim, const int GX, const int GY, const int A, const int B, const int N, const int out_ch) {
+			assert(idim.length() > 0);
 			assert(idim.X % A == 0);
 			assert(idim.Y % A == 0);
+			dimensions_t odim;
+			odim.X = (idim.X / A) * B;
+			odim.Y = (idim.Y / A) * B;
+			odim.C = out_ch;
+			assert(odim.length() > 0);
 			assert(odim.X % B == 0);
 			assert(odim.Y % B == 0);
 			assert((idim.X / A) == (odim.X / B));
 			assert((idim.Y / A) == (odim.Y / B));
-			odim.X = (idim.X * B) / A;
-			odim.Y = (idim.Y * B) / A;
-			odim.C = out_ch;
-			assert(idim.length() > 0);
-			assert(odim.length() > 0);
 			layers.push_back(ae_layer(idim, odim, layer_pattern::encode_mix(A, B, N), GX, GY));
+			return odim;
 		}
 
 		ae_model(dimensions_t input_dimensions) {
@@ -67,14 +70,15 @@ namespace ML::models::autoencoder_subimage {
 			const int ch = idim.C;
 
 			// encoder: mix and condense image.
-			push_layer_encode_mix(idim, odim, 8,8,	8,2, 8,	 8); idim = odim;
-			push_layer_encode_mix(idim, odim, 4,4,	8,2,16,	24); idim = odim;
-			push_layer_encode_mix(idim, odim, 2,2,	8,2,16,	72); idim = odim;
+			odim = push_layer_encode(idim, 8,8,	8,2,	12); idim = odim;
+			//push_layer_encode_mix(idim, odim, 8,8,	8,2, 8,	 8); idim = odim;
+			//push_layer_encode_mix(idim, odim, 4,4,	8,2,16,	24); idim = odim;
+			//push_layer_encode_mix(idim, odim, 2,2,	8,2,16,	72); idim = odim;
 
 			// decoder: expand image back to original size.
-			push_layer_encode_mix(idim, odim, 2,2,	2,8,4,	24); idim = odim;
-			push_layer_encode_mix(idim, odim, 4,4,	2,8,4,	 8); idim = odim;
-			push_layer_encode_mix(idim, odim, 8,8,	2,8,4,	ch); idim = odim;
+			//push_layer_encode_mix(idim, odim, 2,2,	2,8,4,	24); idim = odim;
+			//push_layer_encode_mix(idim, odim, 4,4,	2,8,4,	 8); idim = odim;
+			odim = push_layer_encode(idim, 8,8,	2,8,	ch); idim = odim;
 
 			assert(odim.X == input_dimensions.X);
 			assert(odim.Y == input_dimensions.Y);

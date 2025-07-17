@@ -57,6 +57,12 @@ namespace ML::image::value_image_padded {
 				(y >= 0) & (y < innerY())
 			);
 		}
+
+		string toString() const {
+			char buf[256];
+			int len = snprintf(buf, 256, "X=%i, Y=%i, C=%i, pad=%i", X, Y, C, pad);
+			return string(buf, len);
+		}
 	};
 
 	struct value_image_padded_iterator {

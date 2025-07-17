@@ -37,6 +37,12 @@ namespace ML::image::value_image_lines {
 				(other.C == C)
 			);
 		}
+
+		string toString() const {
+			char buf[256];
+			int len = snprintf(buf, 256, "X=%i, Y=%i, C=%i", X, Y, C);
+			return string(buf, len);
+		}
 	};
 
 	/* iterator for scanline images. */

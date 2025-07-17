@@ -60,8 +60,10 @@ namespace ML::models::autoencoder_subimage {
 					const int in_n = fw_offsets.kernel[x] + kofs;
 					sum += weights[wofs + x] * value_image_i.data[in_n];
 				}
-				signal			.data[out_n] = sum;
-				value_image_o	.data[out_n] = activation_func(sum);
+				signal.data[out_n] = sum;
+			}
+			for(int out_n=0;out_n<odim.length();out_n++) {
+				value_image_o.data[out_n] = activation_func(signal.data[out_n]);
 			}
 		}
 
@@ -74,14 +76,16 @@ namespace ML::models::autoencoder_subimage {
 
 			error_image_i.clear();
 			for(int out_n=0;out_n<odim.length();out_n++) {
+				if(error_image_o.data[out_n] == 0.0f) continue;// skip if no error.
 				const int kofs = fw_offsets.kernel_offsets.data[out_n];
 				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const float signal_error_term = error_image_o.data[out_n] * activation_derivative(signal.data[out_n]);
+				const float signal_error_term_w = signal_error_term * mult;
 				biases_error.data[out_n] += signal_error_term;
 				for(int x=0;x<WEIGHTS_PER_OUTPUT_NEURON;x++) {
 					const int in_n = fw_offsets.kernel[x] + kofs;
-					weights_error[wofs + x]		+= signal_error_term * mult * value_image_i.data[in_n];
-					error_image_i.data[in_n]	+= signal_error_term * mult * weights[wofs + x];
+					weights_error[wofs + x]		+= signal_error_term_w * value_image_i.data[in_n];
+					error_image_i.data[in_n]	+= signal_error_term * weights[wofs + x];
 				}
 			}
 		}
@@ -104,7 +108,7 @@ namespace ML::models::autoencoder_subimage {
 		}
 
 		void clear_batch_error_biases() { utils::vector_util::vec_fill(biases_error.data, 0.0f); }
-		void clear_batch_error_weights() { utils::vector_util::vec_fill(weights, 0.0f); }
+		void clear_batch_error_weights() { utils::vector_util::vec_fill(weights_error, 0.0f); }
 	};
 }
 

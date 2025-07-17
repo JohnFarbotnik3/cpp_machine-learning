@@ -8,25 +8,23 @@
 #include "src/image/file_image.cpp"
 #include "src/image/value_image_lines.cpp"
 #include "src/stats.cpp"
-#include "src/models/autoencoder_fixed/ae_model.cpp"
-
-// TODO - continue from here...
+#include "src/models/autoencoder_subimages/ae_model.cpp"
 
 /*
 debug build:
-g++ -std=c++23 -O2 -fsanitize=address -o "./src/models/autoencoder_fixed/main.elf" "./src/models/autoencoder_fixed/main.cpp"
+g++ -std=c++23 -O2 -I "./" -fsanitize=address -o "./src/models/autoencoder_subimages/main.elf" "./src/models/autoencoder_subimages/main.cpp"
 
 build:
-g++ -std=c++23 -O2 -I "./" -o "./src/models/autoencoder_fixed/main.elf" "./src/models/autoencoder_fixed/main.cpp"
-g++ -std=c++23 -O2 -I "./" -march=native -o "./src/models/autoencoder_fixed/main.elf" "./src/models/autoencoder_fixed/main.cpp"
+g++ -std=c++23 -O2 -I "./" -o "./src/models/autoencoder_subimages/main.elf" "./src/models/autoencoder_subimages/main.cpp"
+g++ -std=c++23 -O2 -I "./" -march=native -o "./src/models/autoencoder_subimages/main.elf" "./src/models/autoencoder_subimages/main.cpp"
 
 run:
-./src/models/autoencoder_fixed/main.elf \
+clear && ./src/models/autoencoder_subimages/main.elf \
 -m ./data/models \
 -i ./data/images/images_02 \
--o ./data/output/images_02 \
--w 512 \
--h 512 \
+-o      /dev/shm/images_02_$(date -Iseconds) \
+-w 384 \
+-h 384 \
 -n_training_cycles 500 \
 -tadjustlr_ini 1 \
 -tadjustlr_itv 50 \
@@ -38,7 +36,7 @@ run:
 -lr_b 0.1 \
 -lr_w 0.1 \
 -seed 12345 \
--n_threads 2
+-n_threads 2 > /dev/shm/log_$(date -Iseconds).txt
 
 perf:
 perf stat -d -d -d -- <RUN COMMAND WITH OPTIONS>
@@ -51,9 +49,9 @@ using std::string;
 using std::vector;
 using timepoint = ML::stats::timepoint;
 namespace fs = std::filesystem;
-using model_t = ML::models::autoencoder_fixed::ae_model;
-using model_image_t = ML::image::value_image_lines<float>;
-using image_dim_t = ML::image::value_image_lines_dimensions;
+using model_t = ML::models::autoencoder_subimage::ae_model;
+using model_image_t = ML::image::value_image_lines::value_image_lines<float>;
+using image_dim_t = ML::image::value_image_lines::value_image_lines_dimensions;
 
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
@@ -93,7 +91,7 @@ struct sample_image_cache {
 	}
 	model_image_t get_sample(const string path, model_image_t& sample_buffer, const file_image_t& loaded_image) {
 		if(samples.contains(path)) return samples.at(path);
-		ML::image::generate_sample_image(sample_buffer, loaded_image);
+		ML::image::value_image_lines::generate_sample_image(sample_buffer, loaded_image);
 		samples.insert_or_assign(path, sample_buffer);
 		return samples.at(path);
 	}
@@ -117,15 +115,11 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 	}
 
 	// run training cycle.
-	int X = model.input_dimensions.X;
-	int Y = model.input_dimensions.Y;
-	int C = model.input_dimensions.C;
-	model_image_t image_input_img(X, Y, C);
-	const int IMAGE_SIZE = image_input_img.data.size();
-	vector<float> image_input (IMAGE_SIZE);
-	vector<float> image_output(IMAGE_SIZE);
-	vector<float> image_error (IMAGE_SIZE);
-	vector<float> image_temp  (IMAGE_SIZE);
+	model_image_t image_input_img(model.image_dimensions);
+	model_image_t image_input (model.image_dimensions);
+	model_image_t image_output(model.image_dimensions);
+	model_image_t image_error (model.image_dimensions);
+	model_image_t image_temp  (model.image_dimensions);
 	float batch_error = 0.0f;
 	float batch_count = 0.0f;
 	for(const auto& minibatch : image_minibatches) {
@@ -147,14 +141,15 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 			const auto& entry = minibatch[z];
 			const string path = entry.path().string();
 			t0 = timepoint::now();
-			ML::image::file_image loaded_image = cache.get_file(path, C);
+			const int ch = model.image_dimensions.C;
+			ML::image::file_image loaded_image = cache.get_file(path, ch);
 			t1 = timepoint::now();
 			settings.stats.push_value("dt load image", t1.delta_us(t0));
 
 			// generate sample.
 			t0 = timepoint::now();
 			image_input_img = cache.get_sample(path, image_input_img, loaded_image);
-			utils::vector_util::vec_copy(image_input, image_input_img.data, 0, image_input.size());
+			utils::vector_util::vec_copy(image_input.data, image_input_img.data, 0, image_input.data.size());
 			t1 = timepoint::now();
 			settings.stats.push_value("dt gen sample", t1.delta_us(t0));
 
@@ -167,7 +162,7 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 			// compute error.
 			t0 = timepoint::now();
 			model.generate_error_image(image_input_img, image_output, image_error, false, true);
-			const float avg_error = utils::vector_util::vec_sum_abs_mt(image_error, 0, image_error.size(), settings.n_threads) / image_error.size();
+			const float avg_error = utils::vector_util::vec_sum_abs_mt(image_error.data, 0, image_error.data.size(), settings.n_threads) / image_error.data.size();
 			batch_error += avg_error;
 			batch_count += 1.0f;
 			t1 = timepoint::now();
@@ -177,16 +172,15 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 
 			// backpropagate.
 			t0 = timepoint::now();
-			model.back_propagate(settings.n_threads, image_temp, image_input, image_error);
+			model.back_propagate(settings.n_threads, image_temp, image_error);
 			t1 = timepoint::now();
 			settings.stats.push_value("dt backprop", t1.delta_us(t0));
 		}
 
 		// apply accumulated error.
 		t0 = timepoint::now();
-		const float lr_b = settings.learning_rate_b;
-		const float lr_w = settings.learning_rate_w;
-		model.apply_batch_error(settings.n_threads, minibatch.size(), lr_b, lr_w);
+		model.apply_batch_error_biases (settings.n_threads, minibatch.size(), settings.learning_rate_b);
+		model.apply_batch_error_weights(settings.n_threads, minibatch.size(), settings.learning_rate_w);
 		t1 = timepoint::now();
 		settings.stats.push_value("dt apply err", t1.delta_us(t0));
 
@@ -247,27 +241,21 @@ void print_model_parameters(model_t& model) {
 	const int COLUMN_WIDTH = 12;
 	ML::stats::print_percentiles_header(percentiles, "%", "%i", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, SUM_COLUMN_WIDTH);
 
-	vector<float> biases;
 	printf("BIASES\n");
 	for(int x=0;x<model.layers.size();x++) {
 		char buf[64];
 		int len = snprintf(buf, 64, "layer %i", x);
 		string name = string(buf, len);
-		const auto& layer = model.layers[x];
-		biases.resize(layer.biases.size());
-		for(int x=0;x<biases.size();x++) biases[x] = layer.biases[x];
+		const vector<float> biases = model.layers[x].get_biases();
 		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, SUM_COLUMN_WIDTH, biases);
 	}
 
-	vector<float> weights;
 	printf("WEIGHTS\n");
 	for(int x=0;x<model.layers.size();x++) {
 		char buf[64];
 		int len = snprintf(buf, 64, "layer %i", x);
 		string name = string(buf, len);
-		const auto& layer = model.layers[x];
-		weights.resize(layer.weights.size());
-		for(int x=0;x<weights.size();x++) weights[x] = layer.weights[x];
+		const vector<float> weights = model.layers[x].get_weights();
 		ML::stats::print_percentiles(percentiles, name, "%.4f", COLUMN_WIDTH, FIRST_COLUMN_WIDTH, SUM_COLUMN_WIDTH, weights);
 	}
 }
@@ -342,10 +330,11 @@ int main(const int argc, const char** argv) {
 			settings.learning_rate_w,
 			error_trend.back()
 		);
-		const float err_curr = error_trend.back();
-		const float err_prev = error_trend[error_trend.size()-5];
-		if(error_trend.size() >= 5 && err_curr > err_prev) {
-			fprintf(stderr, "ERROR RATE INCREASED: z=%i/%i, err_prev=%f, err_curr=%f\n", z+1, n_training_cycles, err_prev, err_curr);
+		// warn if error starts increasing.
+		if(z >= 5) {
+			const float err_curr = error_trend.back();
+			const float err_prev = error_trend[error_trend.size()-5];
+			if(err_curr > err_prev) fprintf(stderr, "ERROR RATE INCREASED: z=%i/%i, err_prev=%f, err_curr=%f\n", z+1, n_training_cycles, err_prev, err_curr);
 		}
 		// print stats.
 		if(z % print_interval_stats == 0) {
@@ -376,26 +365,24 @@ int main(const int argc, const char** argv) {
 
 	// test model by outputting images.
 	printf("outputting decoded images.\n");
-	int X = model.input_dimensions.X;
-	int Y = model.input_dimensions.Y;
-	int C = model.input_dimensions.C;
-	model_image_t image_input (X, Y, C);
-	model_image_t image_output(X, Y, C);
+	model_image_t image_input (model.image_dimensions);
+	model_image_t image_output(model.image_dimensions);
 	for(const fs::directory_entry entry : settings.image_entries) {
 		// load image.
-		ML::image::file_image loaded_image = ML::image::load_file_image(entry.path().string(), C);
-		ML::image::generate_sample_image(image_input, loaded_image);
+		const int ch = model.image_dimensions.C;
+		ML::image::file_image loaded_image = ML::image::load_file_image(entry.path().string(), ch);
+		ML::image::value_image_lines::generate_sample_image(image_input, loaded_image);
 		// propagate.
-		model.propagate(settings.n_threads, image_input.data, image_output.data);
+		model.propagate(settings.n_threads, image_input, image_output);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output;
 		if(n_training_cycles == -1) {
-			output = ML::image::to_file_image(image_input, false);// TEST
+			output = ML::image::value_image_lines::to_file_image(image_input, false);// TEST
 		} else {
-			output = ML::image::to_file_image(image_output, false);
+			output = ML::image::value_image_lines::to_file_image(image_output, false);
 		}
-		ML::image::save_file_image(output, outpath.string(), image_input.C);
+		ML::image::save_file_image(output, outpath.string(), image_input.dim.C);
 	}
 	printf("done.\n");
 
