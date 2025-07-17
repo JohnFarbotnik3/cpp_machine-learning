@@ -87,6 +87,7 @@ namespace ML::models::autoencoder_subimage {
 		simple_image_i kernel_offsets;
 	};
 
+	///*
 	float activation_func(const float value) {
 		const float sign = value >= 0.0f ? 1.0f : -1.0f;
 		const float mag = std::abs(value);
@@ -105,6 +106,17 @@ namespace ML::models::autoencoder_subimage {
 		if(mag < 2.00f) return 0.3f;
 		return 0.1f;
 	}
+	//*/
+
+	/*
+	float activation_func(const float value) {
+		return value / (1.0f + std::abs(value));
+	}
+
+	float activation_derivative(const float value) {
+		return (activation_func(value+0.001f) - activation_func(value)) * 1000.0f;
+	}
+	//*/
 
 }
 

@@ -76,7 +76,7 @@ namespace ML::models::autoencoder_subimage {
 
 			error_image_i.clear();
 			for(int out_n=0;out_n<odim.length();out_n++) {
-				if(error_image_o.data[out_n] == 0.0f) continue;// skip if no error.
+				if(error_image_o.data[out_n] == 0.0f) continue;// OPTIMIZATION: skip if no error.
 				const int kofs = fw_offsets.kernel_offsets.data[out_n];
 				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const float signal_error_term = error_image_o.data[out_n] * activation_derivative(signal.data[out_n]);

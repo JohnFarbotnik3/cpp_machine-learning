@@ -205,20 +205,10 @@ of using caching.
 
 
 > subimage autoencoder
-! only the inner part of output image participates in foreward-prop,
-but the whole image - including padding - participates in back-prop.
-* consider using function-pointers or template function-objects
-for allowing re-use of different layer iteration algorithms;
-then benchmark to examine performance.
-* test complicated gather-style backprop performance vs
-simple scatter-style backprop to quantify difference.
-it would be strongly preferable to use simple backprop
-and get rid of bp_targets altogether if the performance penalty is not too severe.
-* try pinning particular subimages to particular cores to see if there is a performance benefit.
-* use both scanline images and padded images, instead of trying to shoehorn in maybe-padded images
-where strictly unpadded images should go. ("dim_t_pad", "dim_t_nopad", "image_f_pad", "image_f_nopad", ...)
 * experiment with not populating the padded area of subimages (as if unpadded images were used);
 this will prevent mixing across subimage boundaries but would simplfy code.
+* separate sample bounds from sample-image.
+* allow providing value ranges to sample images so they can be generated with the appropriate values upfront.
 
 
 > add to journal:

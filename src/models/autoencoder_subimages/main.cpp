@@ -52,6 +52,7 @@ namespace fs = std::filesystem;
 using model_t = ML::models::autoencoder_subimage::ae_model;
 using model_image_t = ML::image::value_image_lines::value_image_lines<float>;
 using image_dim_t = ML::image::value_image_lines::value_image_lines_dimensions;
+using file_image_t = ML::image::file_image;
 
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
@@ -71,9 +72,25 @@ void print_usage(string msg) {
 	printf("-m MODELS_DIR -i INPUT_IMAGES_DIR -o OUTPUT_IMAGES_DIR\n");
 }
 
-struct sample_image_cache {
-	using file_image_t = ML::image::file_image;
 
+void generate_sample_image_normalized(model_image_t& sample, const file_image_t& image, const int n_threads) {
+	ML::image::value_image_lines::generate_sample_image(sample, image);
+	for(int y=sample.y0;y<sample.y1;y++) {
+	for(int x=sample.x0;x<sample.x1;x++) {
+	for(int c=0;c<sample.dim.C;c++) {
+		const int i = sample.dim.get_offset(x, y, c);
+		sample.data[i] = sample.data[i] - 0.5f;
+	}}}
+}
+file_image_t to_file_image_normalized(const model_image_t& output, const bool clamp_to_sample_area, const int n_threads) {
+	model_image_t temp = output;
+	utils::vector_util::vec_fma_mt<float>(temp.data, 1.0f, +0.5f, 0, temp.data.size(), n_threads);
+	return ML::image::value_image_lines::to_file_image(temp, clamp_to_sample_area);
+}
+
+
+
+struct sample_image_cache {
 	std::map<string, file_image_t> files;
 	std::map<string, model_image_t> samples;
 
@@ -89,9 +106,9 @@ struct sample_image_cache {
 	bool has_sample(const string path) {
 		return samples.contains(path);
 	}
-	model_image_t get_sample(const string path, model_image_t& sample_buffer, const file_image_t& loaded_image) {
+	model_image_t get_sample(const string path, model_image_t& sample_buffer, const file_image_t& loaded_image, const int n_threads) {
 		if(samples.contains(path)) return samples.at(path);
-		ML::image::value_image_lines::generate_sample_image(sample_buffer, loaded_image);
+		generate_sample_image_normalized(sample_buffer, loaded_image, n_threads);
 		samples.insert_or_assign(path, sample_buffer);
 		return samples.at(path);
 	}
@@ -115,7 +132,6 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 	}
 
 	// run training cycle.
-	model_image_t image_input_img(model.image_dimensions);
 	model_image_t image_input (model.image_dimensions);
 	model_image_t image_output(model.image_dimensions);
 	model_image_t image_error (model.image_dimensions);
@@ -148,8 +164,7 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 
 			// generate sample.
 			t0 = timepoint::now();
-			image_input_img = cache.get_sample(path, image_input_img, loaded_image);
-			utils::vector_util::vec_copy(image_input.data, image_input_img.data, 0, image_input.data.size());
+			image_input = cache.get_sample(path, image_input, loaded_image, settings.n_threads);
 			t1 = timepoint::now();
 			settings.stats.push_value("dt gen sample", t1.delta_us(t0));
 
@@ -161,7 +176,7 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 
 			// compute error.
 			t0 = timepoint::now();
-			model.generate_error_image(image_input_img, image_output, image_error, false, true);
+			model.generate_error_image(image_input, image_output, image_error, 1.0f, true);
 			const float avg_error = utils::vector_util::vec_sum_abs_mt(image_error.data, 0, image_error.data.size(), settings.n_threads) / image_error.data.size();
 			batch_error += avg_error;
 			batch_count += 1.0f;
@@ -371,16 +386,16 @@ int main(const int argc, const char** argv) {
 		// load image.
 		const int ch = model.image_dimensions.C;
 		ML::image::file_image loaded_image = ML::image::load_file_image(entry.path().string(), ch);
-		ML::image::value_image_lines::generate_sample_image(image_input, loaded_image);
+		generate_sample_image_normalized(image_input, loaded_image, settings.n_threads);
 		// propagate.
 		model.propagate(settings.n_threads, image_input, image_output);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output;
 		if(n_training_cycles == -1) {
-			output = ML::image::value_image_lines::to_file_image(image_input, false);// TEST
+			output = to_file_image_normalized(image_input, false, settings.n_threads);// TEST
 		} else {
-			output = ML::image::value_image_lines::to_file_image(image_output, false);
+			output = to_file_image_normalized(image_output, false, settings.n_threads);
 		}
 		ML::image::save_file_image(output, outpath.string(), image_input.dim.C);
 	}

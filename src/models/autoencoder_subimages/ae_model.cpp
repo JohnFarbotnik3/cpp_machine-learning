@@ -70,15 +70,12 @@ namespace ML::models::autoencoder_subimage {
 			const int ch = idim.C;
 
 			// encoder: mix and condense image.
-			odim = push_layer_encode(idim, 8,8,	8,2,	12); idim = odim;
-			//push_layer_encode_mix(idim, odim, 8,8,	8,2, 8,	 8); idim = odim;
-			//push_layer_encode_mix(idim, odim, 4,4,	8,2,16,	24); idim = odim;
-			//push_layer_encode_mix(idim, odim, 2,2,	8,2,16,	72); idim = odim;
+			odim = push_layer_encode	(idim, 8,8,	8,2,	16); idim = odim;
+			odim = push_layer_encode	(idim, 4,4,	8,2,	48); idim = odim;
 
 			// decoder: expand image back to original size.
-			//push_layer_encode_mix(idim, odim, 2,2,	2,8,4,	24); idim = odim;
-			//push_layer_encode_mix(idim, odim, 4,4,	2,8,4,	 8); idim = odim;
-			odim = push_layer_encode(idim, 8,8,	2,8,	ch); idim = odim;
+			odim = push_layer_encode	(idim, 4,4,	2,8,	16); idim = odim;
+			odim = push_layer_encode	(idim, 8,8,	2,8,	ch); idim = odim;
 
 			assert(odim.X == input_dimensions.X);
 			assert(odim.Y == input_dimensions.Y);
@@ -122,7 +119,7 @@ namespace ML::models::autoencoder_subimage {
 			WARNING: loss_squared can lead to error-concentration which causes models to explode
 			when training is going well and they are very close to 0 average error.
 		*/
-		void generate_error_image(const simple_image_f& input, const simple_image_f& output, simple_image_f& error, bool loss_squared, bool clamp_error) {
+		void generate_error_image(const simple_image_f& input, const simple_image_f& output, simple_image_f& error, float loss_power, bool clamp_error) {
 			assert(output.dim.equals(input.dim));
 			assert(output.dim.equals(error.dim));
 			assert(output.dim.length() > 0);
@@ -139,7 +136,7 @@ namespace ML::models::autoencoder_subimage {
 			const int ic0 = 0;
 			const int ic1 = input.dim.C;
 
-			if(loss_squared) {
+			if(loss_power != 1.0f) {
 				float sum_e1 = 0;
 				float sum_e2 = 0;
 				for(int iy=iy0;iy<iy1;iy++) {
@@ -147,7 +144,7 @@ namespace ML::models::autoencoder_subimage {
 				for(int ic=ic0;ic<ic1;ic++) {
 					const int i = error.dim.get_offset(ix, iy, ic);
 					const float e1 = input.data[i] - output.data[i];
-					const float e2 = e1 * std::abs(e1);
+					const float e2 = std::pow(std::abs(e1), loss_power) * (e1 >= 0.0f ? 1.0f : -1.0f);
 					error.data[i] = e2;
 					sum_e1 += e1;
 					sum_e2 += e2;

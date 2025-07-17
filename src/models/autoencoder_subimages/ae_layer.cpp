@@ -55,9 +55,6 @@ namespace ML::models::autoencoder_subimage {
 			// create grid of subimages.
 			subidim = padded_dim_t(idim.X/grid_X, idim.Y/grid_Y, idim.C, pad);
 			subodim = simple_dim_t(odim.X/grid_X, odim.Y/grid_Y, odim.C);
-			printf("gx=%i, gy=%i, idim={%s}, odim={%s}\n", grid_X, grid_Y, idim.toString().c_str(), odim.toString().c_str());
-			printf("subidim: %s\n", subidim.toString().c_str());
-			printf("subodim: %s\n", subodim.toString().c_str());
 			for(int y=0;y<grid_Y;y++) {
 			for(int x=0;x<grid_X;x++) {
 				subimages.push_back(subimage(subidim, subodim, pattern));
