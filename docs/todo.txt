@@ -1,14 +1,52 @@
 
-
-* create optimized variants of the simplified network modules in the "networks"
-folder by copying file, appending "_o1", "_o2", etc. and then optimizing whatever looks like
-it will produce the biggest speedup.
-^ in particular, reducing size of neuron structures by extracting values/value-histories from neurons,
-as well as per-iteration loss, in order to get better data-locality.
-
-
 * how to train weights and biases:
 https://dustinstansbury.github.io/theclevermachine/derivation-backpropagation
+
+
+> video compression
+- rather than train a full video autoencoder, it would be easier to train a upscaling convolution-head
+which takes in the frames [N-x, N] of the downscaled video plus [N-x, N-1] frames of the full scale video,
+to predict the next frame. this can be trained to match the full video as closely as possible,
+and remaining error is encoded as a loss-stream.
+^ to reconstitute the video, we would need: the downscaled video, the loss stream, and the convolution-head.
+- it may make sense to train an upscaling convolution-head to work on images as well.
+* also experiment with LZMA for video (of particular interest are vtuber karaoke streams).
+
+
+> convolution-based autoencoder.
+- it may be possible to significantly beat the information density of a full image autoencoder
+by training a convolution-based autoencoder instead.
+- the convolution-head would see a scaled-down sample of the entire input image (ex: 64x64)
+as well as an NxN patch of pixels directly beneath it (ex: 32x32),
+outputting a smaller BxB patch (ex: 8x8) with additional colour channels,
+scaling the input image down by some factor.
+- this would be easy enough to multithread foreward-propagation as well as backward-propagation,
+however it would technically require vastly more computation than the full-image AE.
+* this is likely a GPU-oriented task, as GPUs handle huge numbers of computations
+on shared data fairly well.
+- the part of a convolution-head that computes on the image-sample
+can cache the result of that computation (since the input image-sample doesnt change,
+only the NxN convolution-area).
+- convolution-heads may benefit from having multiple layers,
+in exchange for having less encoding steps/layers to condense the image.
+- convolution-heads will still have to be quite large in order to
+develop an actual understanding of the images being compressed.
+* backprop would involve accumulating error across all the output patches,
+which I'm not sure how to effectively multithread on GPUs (likely group summing of some kind).
+^ input-image can be used to re-compute input/signal history throughout layers of convolution head,
+so the only history that is actually needed is aforementioned input-image.
+^ perhaps spawn a thread for each row of the image;
+each thread accumulates batch-error across the row,
+then batch-errors accumulated by all the threads are summed together.
+this would (hopefully) keep the memory requirements reasonable.
+^ if convolution-heads are roughly 50MiB (large enough to begin to understand),
+then memory will likely still be an issue.
+^ it may be far simpler to resort to some heuristic form of back-propagated annealing.
+if backprop is slower or more memory intensive by a wide enough margin, it could
+actually converge faster.
+^^ back-propagated annealing could work with just the overall error of the output-layer of the convolution head,
+but I havent figured out how to produce an input-error image with it yet.
+
 
 
 > create visualizations showing the actual neural network itself.
@@ -194,13 +232,9 @@ and some things will be made simpler by having a *fixed* number of targets for e
 	of model variants with different annealing seeds & strengths (ex. LR*0, LR*0.5, LR*1.0, LR*2.0).
 ** try smaller bias distribution (reduced stdev),
 	and add commandline arguments for model-parameter distributions.
-** clamp output image values when generating image files / previews.
-x long run with 30 images crashed at z=~1000/2000, see logs.
-^ remove assertion in backprop normalization that insum & outsum > 0,
-and replace with an if-condition + a warning printed to console.
-** try centering range of image values on 0.0 (currently [0.0, 1.0] which is centered on 0.5).
 ** generate sample images and output to specified temp directory, then use those for training instead
 of using caching.
+- experiment with different colour-channel formats, example RGB, HSL, etc...
 ...
 
 
@@ -209,11 +243,31 @@ of using caching.
 this will prevent mixing across subimage boundaries but would simplfy code.
 * separate sample bounds from sample-image.
 * allow providing value ranges to sample images so they can be generated with the appropriate values upfront.
+*** interleaved history/batched images: combine <H> images into single interleaved image;
+history images can be similarly interleaved. this will reduce impact of scatter-style backprop,
+and has *significant* SIMD potential since same bias/weight can be used across <H> operations.
+^ pixel data order: Y, X, C, H.
+^ the content of "patterns.cpp" would then be reasonable to hardcode into foreward-prop and back-prop;
+allowing removal of read-offset-kernel and kernel-offsets-image.
+(first examine performance impact of inlining it WITHOUT the interleaved-images and SIMD).
+^ this will require packing and unpacking data to/from base image types.
+^ tiled-image format can be removed - and the padded, interleaved-lines, and interleaved-padded images
+only need structs to be defined (the iterators and extra stuff is not needed).
+^ add "alignas" so that image data can be loaded directly for SIMD operations (figure out how to get ideal SIMD alginment width).
+^ in theory, batch-error may not be needed if batch size is equal to interleaved image count,
+as batch-error can be applied to weights and biases in-place.
+^ input-value-image and output-error-image can be passed directly to subimages for f/b-propagation,
+removing a copying step. without padded images, bounds checking will be needed again, but thats okay now.
+input-images will now need to be preserved by layers though.
 
 
 > add to journal:
 - switching from ReLU with leakage to piecewise sigmoid to fix bias degeneration
 	(biases tending towards larger values as backprop works it way to input layer).
+- optimization: skipping backprop on pixels with 0 output-side error.
+	^ this speeds up backprop enough that simpler write-oriented algorithm is probably sufficient.
+- optimization: interleaving mini-batches of images at the pixel-value level for optimal memory access and SIMD.
+	^ this renders many of my previous methods of optimization obsolete.
 ...
 
 
