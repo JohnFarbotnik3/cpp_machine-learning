@@ -9,10 +9,12 @@
 #include "src/image/value_image_lines.cpp"
 #include "src/stats.cpp"
 #include "src/models/autoencoder_subimages/ae_model.cpp"
+#include "src/models/autoencoder_subimages/types.cpp"
 
 /*
 debug build:
-g++ -std=c++23 -O2 -I "./" -fsanitize=address -o "./src/models/autoencoder_subimages/main.elf" "./src/models/autoencoder_subimages/main.cpp"
+g++ -std=c++23 -O2 -I "./" -g -fsanitize=address -o "./src/models/autoencoder_subimages/main.elf" "./src/models/autoencoder_subimages/main.cpp"
+g++ -std=c++23 -O2 -I "./" -g -o "./src/models/autoencoder_subimages/main.elf" "./src/models/autoencoder_subimages/main.cpp"
 
 build:
 g++ -std=c++23 -O2 -I "./" -o "./src/models/autoencoder_subimages/main.elf" "./src/models/autoencoder_subimages/main.cpp"
@@ -38,6 +40,9 @@ clear && ./src/models/autoencoder_subimages/main.elf \
 -seed 12345 \
 -n_threads 2 > /dev/shm/log_$(date -Iseconds).txt
 
+debug run (requires compiling with "-g" option):
+gdb -ex=r --args ...COMMAND...
+
 perf:
 perf stat -d -d -d -- <RUN COMMAND WITH OPTIONS>
 perf record -- COMMAND [OPTIONS...]
@@ -53,6 +58,9 @@ using model_t = ML::models::autoencoder_subimage::ae_model;
 using model_image_t = ML::image::value_image_lines::value_image_lines<float>;
 using image_dim_t = ML::image::value_image_lines::value_image_lines_dimensions;
 using file_image_t = ML::image::file_image;
+using ML::image::value_image_lines::sample_bounds;
+using namespace ML::models::autoencoder_subimage;
+
 
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
@@ -73,48 +81,88 @@ void print_usage(string msg) {
 }
 
 
-void generate_sample_image_normalized(model_image_t& sample, const file_image_t& image, const int n_threads) {
-	ML::image::value_image_lines::generate_sample_image(sample, image);
-	for(int y=sample.y0;y<sample.y1;y++) {
-	for(int x=sample.x0;x<sample.x1;x++) {
+// TODO - move this functionality into sample generating function instead.
+sample_bounds generate_sample_image_normalized(model_image_t& sample, const file_image_t& image, const int n_threads) {
+	sample_bounds bounds = ML::image::value_image_lines::generate_sample_image(sample, image);
+	for(int y=bounds.y0;y<bounds.y1;y++) {
+	for(int x=bounds.x0;x<bounds.x1;x++) {
 	for(int c=0;c<sample.dim.C;c++) {
 		const int i = sample.dim.get_offset(x, y, c);
 		sample.data[i] = sample.data[i] - 0.5f;
 	}}}
+	return bounds;
 }
-file_image_t to_file_image_normalized(const model_image_t& output, const bool clamp_to_sample_area, const int n_threads) {
-	model_image_t temp = output;
+
+// TODO - move this functionality into sample generating function instead.
+file_image_t to_file_image_normalized(const model_image_t& sample, const sample_bounds bounds, const bool clamp_to_sample_area, const int n_threads) {
+	model_image_t temp = sample;
 	utils::vector_util::vec_fma_mt<float>(temp.data, 1.0f, +0.5f, 0, temp.data.size(), n_threads);
-	return ML::image::value_image_lines::to_file_image(temp, clamp_to_sample_area);
+	return ML::image::value_image_lines::to_file_image(temp, bounds, clamp_to_sample_area);
+}
+
+/*
+	WARNING: loss_squared can lead to error-concentration which causes models to explode
+	when training is going well and they are very close to 0 average error.
+*/
+void generate_error_image(const simple_image_f& input, const simple_image_f& output, simple_image_f& error, const sample_bounds bounds, float loss_power, bool clamp_error) {
+	assert(output.dim.equals(input.dim));
+	assert(output.dim.equals(error.dim));
+	assert(output.dim.length() > 0);
+	assert(bounds.x1 > bounds.x0);
+	assert(bounds.y1 > bounds.y0);
+
+	error.clear();
+
+	// sample area bounds.
+	const int ix0 = bounds.x0;
+	const int iy0 = bounds.y0;
+	const int ix1 = bounds.x1;
+	const int iy1 = bounds.y1;
+	const int ic0 = 0;
+	const int ic1 = input.dim.C;
+
+	if(loss_power != 1.0f) {
+		float sum_e1 = 0;
+		float sum_e2 = 0;
+		for(int iy=iy0;iy<iy1;iy++) {
+		for(int ix=ix0;ix<ix1;ix++) {
+		for(int ic=ic0;ic<ic1;ic++) {
+			const int i = error.dim.get_offset(ix, iy, ic);
+			const float e1 = input.data[i] - output.data[i];
+			const float e2 = std::pow(std::abs(e1), loss_power) * (e1 >= 0.0f ? 1.0f : -1.0f);
+			error.data[i] = e2;
+			sum_e1 += e1;
+			sum_e2 += e2;
+		}}}
+		// normalize to match original total error.
+		float mult = sum_e1 / sum_e2;
+		for(int iy=iy0;iy<iy1;iy++) {
+		for(int ix=ix0;ix<ix1;ix++) {
+		for(int ic=ic0;ic<ic1;ic++) {
+			const int i = error.dim.get_offset(ix, iy, ic);
+			error.data[i] *= mult;
+		}}}
+	} else {
+		for(int iy=iy0;iy<iy1;iy++) {
+		for(int ix=ix0;ix<ix1;ix++) {
+		for(int ic=ic0;ic<ic1;ic++) {
+			const int i = error.dim.get_offset(ix, iy, ic);
+			error.data[i] = input.data[i] - output.data[i];
+		}}}
+	}
+
+	if(clamp_error) {
+		for(int iy=iy0;iy<iy1;iy++) {
+		for(int ix=ix0;ix<ix1;ix++) {
+		for(int ic=ic0;ic<ic1;ic++) {
+			const int i = error.dim.get_offset(ix, iy, ic);
+			error.data[i] = std::clamp(error.data[i], -1.0f, 1.0f);
+		}}}
+	}
 }
 
 
-
-struct sample_image_cache {
-	std::map<string, file_image_t> files;
-	std::map<string, model_image_t> samples;
-
-	bool has_file(const string path) {
-		return files.contains(path);
-	}
-	ML::image::file_image& get_file(const string path, int channels) {
-		if(files.contains(path)) return files.at(path);
-		files.insert_or_assign(path, ML::image::load_file_image(path, channels));
-		return files.at(path);
-	}
-
-	bool has_sample(const string path) {
-		return samples.contains(path);
-	}
-	model_image_t get_sample(const string path, model_image_t& sample_buffer, const file_image_t& loaded_image, const int n_threads) {
-		if(samples.contains(path)) return samples.at(path);
-		generate_sample_image_normalized(sample_buffer, loaded_image, n_threads);
-		samples.insert_or_assign(path, sample_buffer);
-		return samples.at(path);
-	}
-};
-
-void training_cycle(model_t& model, training_settings& settings, sample_image_cache& cache) {
+void training_cycle(model_t& model, training_settings& settings) {
 	// divide image entries into batches.
 	vector<fs::directory_entry> pool = settings.image_entries;
 	vector<vector<fs::directory_entry>> image_minibatches;
@@ -158,13 +206,13 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 			const string path = entry.path().string();
 			t0 = timepoint::now();
 			const int ch = model.image_dimensions.C;
-			ML::image::file_image loaded_image = cache.get_file(path, ch);
+			ML::image::file_image loaded_image = ML::image::load_file_image(path, ch);
 			t1 = timepoint::now();
 			settings.stats.push_value("dt load image", t1.delta_us(t0));
 
 			// generate sample.
 			t0 = timepoint::now();
-			image_input = cache.get_sample(path, image_input, loaded_image, settings.n_threads);
+			sample_bounds bounds = generate_sample_image_normalized(image_input, loaded_image, settings.n_threads);
 			t1 = timepoint::now();
 			settings.stats.push_value("dt gen sample", t1.delta_us(t0));
 
@@ -176,7 +224,7 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 
 			// compute error.
 			t0 = timepoint::now();
-			model.generate_error_image(image_input, image_output, image_error, 1.0f, true);
+			generate_error_image(image_input, image_output, image_error, bounds, 1.0f, true);
 			const float avg_error = utils::vector_util::vec_sum_abs_mt(image_error.data, 0, image_error.data.size(), settings.n_threads) / image_error.data.size();
 			batch_error += avg_error;
 			batch_count += 1.0f;
@@ -205,7 +253,7 @@ void training_cycle(model_t& model, training_settings& settings, sample_image_ca
 	settings.batch_error_trend.push_back(batch_error / batch_count);
 }
 
-void update_learning_rate(model_t& model, training_settings& settings, int cycles, sample_image_cache& cache, const char mode) {
+void update_learning_rate(model_t& model, training_settings& settings, int cycles, const char mode) {
 	const float LEARNING_RATE_LIMIT = 1.0f;
 	float best_pct_error;
 	training_settings best_settings = settings;
@@ -223,7 +271,7 @@ void update_learning_rate(model_t& model, training_settings& settings, int cycle
 		if(mode == 'b') test_settings.learning_rate_b = new_rate;
 		if(mode == 'w') test_settings.learning_rate_w = new_rate;
 		printf("trying rate [mode=%c] = %f\n", mode, new_rate);
-		for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings, cache);
+		for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings);
 		const vector<int> percentiles { 20 };
 		float pct_error = ML::stats::get_percentile_values(percentiles, test_settings.stats.groups.at("avg error"))[0];
 		if(pct_error < best_pct_error || z == 0) {
@@ -331,14 +379,13 @@ int main(const int argc, const char** argv) {
 	///*
 	// train model.
 	printf("starting training.\n");
-	sample_image_cache cache;
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
 	vector<float>& error_trend = settings.batch_error_trend;
 	for(int z=0;z<n_training_cycles;z++) {
 		// run training batch.
-		training_cycle(model, settings, cache);
+		training_cycle(model, settings);
 		printf("training cycle: %i/%i | error: %f\n", z+1, n_training_cycles, error_trend.back());
-		if(z % (n_training_cycles/100) == 0) fprintf(stderr, "TRAINING: z=%i/%i, lr_b=%f, lr_w=%f, er=%f\n",
+		if(z % std::max(1, n_training_cycles/100) == 0) fprintf(stderr, "TRAINING: z=%i/%i, lr_b=%f, lr_w=%f, er=%f\n",
 			z+1,
 			n_training_cycles,
 			settings.learning_rate_b,
@@ -362,8 +409,8 @@ int main(const int argc, const char** argv) {
 		// update learning rate.
 		if(z % tadjustlr_itv == 0 && (z > 0 || tadjustlr_ini)) {
 			printf("updating learning rate:\n");
-			update_learning_rate(model, settings, tadjustlr_len, cache, 'b');
-			update_learning_rate(model, settings, tadjustlr_len, cache, 'w');
+			update_learning_rate(model, settings, tadjustlr_len, 'b');
+			update_learning_rate(model, settings, tadjustlr_len, 'w');
 			printf("new learning rate: lr_b=%f, lr_w=%f\n", settings.learning_rate_b, settings.learning_rate_w);
 			z += tadjustlr_len;
 		}
@@ -386,16 +433,16 @@ int main(const int argc, const char** argv) {
 		// load image.
 		const int ch = model.image_dimensions.C;
 		ML::image::file_image loaded_image = ML::image::load_file_image(entry.path().string(), ch);
-		generate_sample_image_normalized(image_input, loaded_image, settings.n_threads);
+		sample_bounds bounds = generate_sample_image_normalized(image_input, loaded_image, settings.n_threads);
 		// propagate.
 		model.propagate(settings.n_threads, image_input, image_output);
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output;
 		if(n_training_cycles == -1) {
-			output = to_file_image_normalized(image_input, false, settings.n_threads);// TEST
+			output = to_file_image_normalized(image_input, bounds, false, settings.n_threads);// TEST
 		} else {
-			output = to_file_image_normalized(image_output, false, settings.n_threads);
+			output = to_file_image_normalized(image_output, bounds, false, settings.n_threads);
 		}
 		ML::image::save_file_image(output, outpath.string(), image_input.dim.C);
 	}

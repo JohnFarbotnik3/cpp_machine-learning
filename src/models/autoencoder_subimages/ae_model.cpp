@@ -115,67 +115,6 @@ namespace ML::models::autoencoder_subimage {
 			layers.back().propagate(n_threads, value_buffer_i, output_values);
 		}
 
-		/*
-			WARNING: loss_squared can lead to error-concentration which causes models to explode
-			when training is going well and they are very close to 0 average error.
-		*/
-		void generate_error_image(const simple_image_f& input, const simple_image_f& output, simple_image_f& error, float loss_power, bool clamp_error) {
-			assert(output.dim.equals(input.dim));
-			assert(output.dim.equals(error.dim));
-			assert(output.dim.length() > 0);
-			assert(input.x1 > input.x0);
-			assert(input.y1 > input.y0);
-
-			error.clear();
-
-			// sample area bounds.
-			const int ix0 = input.x0;
-			const int iy0 = input.y0;
-			const int ix1 = input.x1;
-			const int iy1 = input.y1;
-			const int ic0 = 0;
-			const int ic1 = input.dim.C;
-
-			if(loss_power != 1.0f) {
-				float sum_e1 = 0;
-				float sum_e2 = 0;
-				for(int iy=iy0;iy<iy1;iy++) {
-				for(int ix=ix0;ix<ix1;ix++) {
-				for(int ic=ic0;ic<ic1;ic++) {
-					const int i = error.dim.get_offset(ix, iy, ic);
-					const float e1 = input.data[i] - output.data[i];
-					const float e2 = std::pow(std::abs(e1), loss_power) * (e1 >= 0.0f ? 1.0f : -1.0f);
-					error.data[i] = e2;
-					sum_e1 += e1;
-					sum_e2 += e2;
-				}}}
-				// normalize to match original total error.
-				float mult = sum_e1 / sum_e2;
-				for(int iy=iy0;iy<iy1;iy++) {
-				for(int ix=ix0;ix<ix1;ix++) {
-				for(int ic=ic0;ic<ic1;ic++) {
-					const int i = error.dim.get_offset(ix, iy, ic);
-					error.data[i] *= mult;
-				}}}
-			} else {
-				for(int iy=iy0;iy<iy1;iy++) {
-				for(int ix=ix0;ix<ix1;ix++) {
-				for(int ic=ic0;ic<ic1;ic++) {
-					const int i = error.dim.get_offset(ix, iy, ic);
-					error.data[i] = input.data[i] - output.data[i];
-				}}}
-			}
-
-			if(clamp_error) {
-				for(int iy=iy0;iy<iy1;iy++) {
-				for(int ix=ix0;ix<ix1;ix++) {
-				for(int ic=ic0;ic<ic1;ic++) {
-					const int i = error.dim.get_offset(ix, iy, ic);
-					error.data[i] = std::clamp(error.data[i], -1.0f, 1.0f);
-				}}}
-			}
-		}
-
 		void back_propagate(const int n_threads, simple_image_f& input_error, const simple_image_f& output_error) {
 			assert(input_error.dim.equals(output_error.dim));
 			assert(input_error.dim.length() > 0);

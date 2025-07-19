@@ -107,8 +107,8 @@ namespace ML::models::autoencoder_subimage {
 			}
 		}
 
-		void clear_batch_error_biases() { utils::vector_util::vec_fill(biases_error.data, 0.0f); }
-		void clear_batch_error_weights() { utils::vector_util::vec_fill(weights_error, 0.0f); }
+		void clear_batch_error_biases() { biases_error.data.assign(biases_error.data.size(), 0.0f); }
+		void clear_batch_error_weights() { weights_error.assign(weights_error.size(), 0.0f); }
 	};
 }
 
