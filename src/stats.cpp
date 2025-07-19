@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "./utils/string_manip.cpp"
+#include "./utils/sort_util.cpp"
 
 namespace ML::stats {
 	using std::vector;
@@ -53,8 +54,9 @@ namespace ML::stats {
 	};
 
 	vector<float> get_percentile_values(const vector<int>& percentiles, const vector<float> values) {
-		vector<float> sorted = values;
-		std::sort(sorted.begin(), sorted.end());
+		//vector<float> sorted = values;
+		//std::sort(sorted.begin(), sorted.end());// TODO - implement radix sort for use with floats, as it will likely go far faster.
+		vector<float> sorted = utils::sort_util::radix_sort_f(values);
 		vector<float> pct_values(percentiles.size());
 		for(int x=0;x<percentiles.size();x++) {
 			size_t index = std::clamp<size_t>((sorted.size() * percentiles[x]) / 100, 0, sorted.size()-1);

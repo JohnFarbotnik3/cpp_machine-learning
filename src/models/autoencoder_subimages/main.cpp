@@ -66,6 +66,8 @@ struct training_settings {
 	vector<fs::directory_entry> image_entries;
 	ML::stats::training_stats stats;
 	vector<float> batch_error_trend;
+	int cycle;
+	int n_training_cycles;
 	float learning_rate_b;
 	float learning_rate_w;
 	int n_threads;
@@ -163,6 +165,7 @@ void generate_error_image(const simple_image_f& input, const simple_image_f& out
 
 
 void training_cycle(model_t& model, training_settings& settings) {
+	settings.cycle++;
 	// divide image entries into batches.
 	vector<fs::directory_entry> pool = settings.image_entries;
 	vector<vector<fs::directory_entry>> image_minibatches;
@@ -347,13 +350,14 @@ int main(const int argc, const char** argv) {
 	int input_w = arguments.get_named_value("-w", 512);
 	int input_h = arguments.get_named_value("-h", 512);
 	int input_c = arguments.get_named_value("-channels", 3);
-	int n_training_cycles = arguments.get_named_value("-n_training_cycles", 50);
 	int print_interval_stats = arguments.get_named_value("-print_interval_stats", 1);
 	int print_model_params = arguments.get_named_value("-print_model_params", 1);
 	int print_model_params_debug = arguments.get_named_value("-print_model_params_debug", 0);
 	int tadjustlr_ini = arguments.get_named_value("-tadjustlr_ini", 1);
 	int tadjustlr_itv = arguments.get_named_value("-tadjustlr_itv", 50);
 	int tadjustlr_len = arguments.get_named_value("-tadjustlr_len", 10);
+	settings.cycle = 0;
+	settings.n_training_cycles = arguments.get_named_value("-n_training_cycles", 50);
 	settings.minibatch_size = arguments.get_named_value("-bsz", 5);
 	settings.learning_rate_b = arguments.get_named_value("-lr_b", 0.001f);
 	settings.learning_rate_w = arguments.get_named_value("-lr_w", 0.001f);
@@ -381,25 +385,27 @@ int main(const int argc, const char** argv) {
 	printf("starting training.\n");
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
 	vector<float>& error_trend = settings.batch_error_trend;
-	for(int z=0;z<n_training_cycles;z++) {
+	while(settings.cycle < settings.n_training_cycles) {
 		// run training batch.
 		training_cycle(model, settings);
-		printf("training cycle: %i/%i | error: %f\n", z+1, n_training_cycles, error_trend.back());
-		if(z % std::max(1, n_training_cycles/100) == 0) fprintf(stderr, "TRAINING: z=%i/%i, lr_b=%f, lr_w=%f, er=%f\n",
-			z+1,
-			n_training_cycles,
-			settings.learning_rate_b,
-			settings.learning_rate_w,
-			error_trend.back()
-		);
+		printf("training cycle: %i/%i | error: %f\n", settings.cycle, settings.n_training_cycles, error_trend.back());
+		if(settings.cycle % std::max(1, settings.n_training_cycles/100) == 0) {
+			fprintf(stderr, "TRAINING: z=%i/%i, lr_b=%f, lr_w=%f, er=%f\n",
+				settings.cycle,
+				settings.n_training_cycles,
+				settings.learning_rate_b,
+				settings.learning_rate_w,
+				error_trend.back()
+			);
+		}
 		// warn if error starts increasing.
-		if(z >= 5) {
+		if(settings.cycle >= 5) {
 			const float err_curr = error_trend.back();
 			const float err_prev = error_trend[error_trend.size()-5];
-			if(err_curr > err_prev) fprintf(stderr, "ERROR RATE INCREASED: z=%i/%i, err_prev=%f, err_curr=%f\n", z+1, n_training_cycles, err_prev, err_curr);
+			if(err_curr > err_prev) fprintf(stderr, "ERROR RATE INCREASED: z=%i/%i, err_prev=%f, err_curr=%f\n", settings.cycle, settings.n_training_cycles, err_prev, err_curr);
 		}
 		// print stats.
-		if(z % print_interval_stats == 0) {
+		if(settings.cycle % print_interval_stats == 0) {
 			printf("==============================\n");
 			print_training_stats(settings.stats);
 			if(print_model_params_debug) print_model_parameters(model);
@@ -407,15 +413,12 @@ int main(const int argc, const char** argv) {
 			printf("------------------------------\n");
 		}
 		// update learning rate.
-		if(z % tadjustlr_itv == 0 && (z > 0 || tadjustlr_ini)) {
+		if(settings.cycle % tadjustlr_itv == 0 && (settings.cycle > 0 || tadjustlr_ini)) {
 			printf("updating learning rate:\n");
 			update_learning_rate(model, settings, tadjustlr_len, 'b');
 			update_learning_rate(model, settings, tadjustlr_len, 'w');
 			printf("new learning rate: lr_b=%f, lr_w=%f\n", settings.learning_rate_b, settings.learning_rate_w);
-			z += tadjustlr_len;
 		}
-		// TODO TEST
-		//if(z > 300) print_model_parameters(model);
 	}
 	printf("done training.\n");
 	printf("==============================\n");
@@ -439,7 +442,7 @@ int main(const int argc, const char** argv) {
 		// output result.
 		fs::path outpath = fs::path(output_dir) / fs::path(entry.path()).filename().concat(".png");
 		ML::image::file_image output;
-		if(n_training_cycles == -1) {
+		if(settings.n_training_cycles == -1) {
 			output = to_file_image_normalized(image_input, bounds, false, settings.n_threads);// TEST
 		} else {
 			output = to_file_image_normalized(image_output, bounds, false, settings.n_threads);
