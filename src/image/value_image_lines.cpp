@@ -7,10 +7,10 @@
 #include <vector>
 #include "file_image.cpp"
 
-namespace ML::image::value_image_lines {
+namespace ML::image::value_image {
 	using std::vector;
 
-	struct value_image_lines_dimensions {
+	struct value_image_dimensions {
 		int X = 0;// width of image.
 		int Y = 0;// height of image.
 		int C = 0;// number of channels per pixel.
@@ -30,7 +30,7 @@ namespace ML::image::value_image_lines {
 			);
 		}
 
-		bool equals(const value_image_lines_dimensions& other) const {
+		bool equals(const value_image_dimensions& other) const {
 			return (
 				(other.X == X) &
 				(other.Y == Y) &
@@ -45,25 +45,26 @@ namespace ML::image::value_image_lines {
 		}
 	};
 
-	struct sample_bounds {
-		int x0, x1;
-		int y0, y1;
-	};
-
 	template<class T>
-	struct value_image_lines {
+	struct value_image {
 		vector<T> data;
-		value_image_lines_dimensions dim;
+		value_image_dimensions dim;
 
-		value_image_lines() = default;
-		value_image_lines(const value_image_lines_dimensions dim) : dim(dim), data(dim.length(), 0) {}
+		value_image() = default;
+		value_image(const value_image_dimensions dim) : dim(dim), data(dim.length(), 0) {}
+		value_image(const int X, const int Y, const int C) : dim(value_image_dimensions{ X, Y, C }), data(X*Y*C, 0) {}
 
 		void clear() {
 			data.assign(data.size(), 0);
 		}
 	};
 
-	void sample_area_copy(value_image_lines<float>& sample, const file_image& image, const sample_bounds bounds) {
+	struct sample_bounds {
+		int x0, x1;
+		int y0, y1;
+	};
+
+	void sample_area_copy(value_image<float>& sample, const file_image& image, const sample_bounds bounds) {
 		assert((bounds.x1 - bounds.x0) == image.X);
 		assert((bounds.y1 - bounds.y0) == image.Y);
 		assert(sample.dim.C == image.C);
@@ -79,7 +80,7 @@ namespace ML::image::value_image_lines {
 		}}}
 	}
 
-	void sample_area_nearest_neighbour(value_image_lines<float>& sample, const file_image& image, const sample_bounds bounds) {
+	void sample_area_nearest_neighbour(value_image<float>& sample, const file_image& image, const sample_bounds bounds) {
 		sample.clear();
 
 		const float m = 1.0f / 255.0f;
@@ -97,7 +98,7 @@ namespace ML::image::value_image_lines {
 		}}}
 	}
 
-	void sample_area_linear(value_image_lines<float>& sample, const file_image& image, const sample_bounds bounds) {
+	void sample_area_linear(value_image<float>& sample, const file_image& image, const sample_bounds bounds) {
 		sample.clear();
 
 		// compute float conversions between sample coordinates to image coordinates.
@@ -185,7 +186,7 @@ namespace ML::image::value_image_lines {
 		values outside the sample area are set to 0 and are ignored
 		when computing error.
 	*/
-	sample_bounds generate_sample_image(value_image_lines<float>& sample, const file_image& image) {
+	sample_bounds generate_sample_image(value_image<float>& sample, const file_image& image) {
 		const int sample_X = sample.dim.X;
 		const int sample_Y = sample.dim.Y;
 		sample_bounds bounds;
@@ -237,7 +238,7 @@ namespace ML::image::value_image_lines {
 		which would explain why error rate was low even with very wrong pixels in output files.
 		- however using unclamped conversion can reveal bugs in sampling algorithm.
 	*/
-	file_image to_file_image(value_image_lines<float>& sample, const sample_bounds bounds, bool crop_to_sample_area) {
+	file_image to_file_image(value_image<float>& sample, const sample_bounds bounds, bool crop_to_sample_area) {
 		const float m = 255.0f / 1.0f;
 		if(crop_to_sample_area) {
 			file_image image;

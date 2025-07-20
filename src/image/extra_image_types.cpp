@@ -6,7 +6,7 @@
 #include <vector>
 #include "file_image.cpp"
 
-namespace ML::image::value_image_padded {
+namespace ML::image::extra_image_types {
 	using std::vector;
 
 	struct value_image_padded_dimensions {
@@ -63,21 +63,51 @@ namespace ML::image::value_image_padded {
 			return string(buf, len);
 		}
 	};
-
 	template<class T>
 	struct value_image_padded {
 		vector<T> data;
 		value_image_padded_dimensions dim;
-		// sample bounds.
-		int sx0 = 0, sx1 = 0;
-		int sy0 = 0, sy1 = 0;
 
 		value_image_padded() = default;
 		value_image_padded(const value_image_padded_dimensions dim) : dim(dim), data(dim.outer_length(), 0) {}
 
 		void clear() {
-			for(int x=0;x<data.size();x++) data[x] = 0;
+			data.assign(data.size(), 0);
 		}
+	};
+
+	struct interleaved_image_dimensions {
+		int X;// image width.
+		int Y;// image height.
+		int C;// number of colour channels.
+		int D;// number of interleaved images.
+
+		interleaved_image_dimensions() = default;
+		interleaved_image_dimensions(int X, int Y, int C, int D) {
+			this->X = X;
+			this->Y = Y;
+			this->C = C;
+			this->D = D;
+		}
+
+		int get_offset(int x, int y, int c) const { return (((y*X) + x)*C + c)*D; }
+		int get_offset(int x, int y, int c, int d) const { return (((y*X) + x)*C + c)*D + d; }
+
+		int length() const { return Y*X*C*D; }
+		int row_length() const { return X*C*D; }
+		int pixel_length() const { return C*D; }
+		int channel_length() const { return D; }
+	};
+	template<class T>
+	struct interleaved_image {
+		vector<T> data;
+		interleaved_image_dimensions dim;
+
+		interleaved_image() = default;
+		interleaved_image(const interleaved_image_dimensions dim) : dim(dim), data(dim.length(), 0) {}
+		interleaved_image(const int X, const int Y, const int C, const int D) : dim(X,Y,C,D), data(X*Y*C*D, 0) {}
+
+		void clear() { data.assign(data.size(), 0); }
 	};
 
 }

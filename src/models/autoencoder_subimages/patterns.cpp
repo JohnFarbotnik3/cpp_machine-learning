@@ -5,14 +5,18 @@
 namespace ML::models::autoencoder_subimage {
 	using std::vector;
 
-	input_neuron_offset_struct get_input_neuron_offsets_kernel(const layer_pattern pattern, const padded_dim_t idim, const simple_dim_t odim) {
+	input_neuron_offset_struct get_input_neuron_offsets_kernel(
+		const layer_pattern pattern,
+		const value_image_dimensions idim,
+		const value_image_dimensions odim
+	) {
 		const int A = pattern.A;
 		const int B = pattern.B;
 		const int N = pattern.N;
 
 		input_neuron_offset_struct data;
-		vector<int>&	kernel  = data.kernel;
-		simple_image_i&	offsets = data.kernel_offsets;
+		vector<int>&		kernel  = data.kernel;
+		value_image<int>&	offsets = data.kernel_offsets;
 		offsets = simple_image_i(odim);
 
 		assert(pattern.type != LAYER_TYPE::NONE);

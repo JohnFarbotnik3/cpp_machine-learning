@@ -259,6 +259,7 @@ as batch-error can be applied to weights and biases in-place.
 ^ input-value-image and output-error-image can be passed directly to subimages for f/b-propagation,
 removing a copying step. without padded images, bounds checking will be needed again, but thats okay now.
 input-images will now need to be preserved by layers though.
+** write SIMD version of activation function as well.
 
 
 > add to journal:

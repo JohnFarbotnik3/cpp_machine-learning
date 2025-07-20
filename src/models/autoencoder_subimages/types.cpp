@@ -4,17 +4,9 @@
 
 #include <vector>
 #include "src/image/value_image_lines.cpp"
-#include "src/image/value_image_padded.cpp"
 
 namespace ML::models::autoencoder_subimage {
-	//using namespace ML::image;
-	using std::vector;
-	using padded_image_f = ML::image::value_image_padded::value_image_padded<float>;
-	using padded_image_i = ML::image::value_image_padded::value_image_padded<int>;
-	using padded_dim_t = ML::image::value_image_padded::value_image_padded_dimensions;
-	using simple_image_f = ML::image::value_image_lines::value_image_lines<float>;
-	using simple_image_i = ML::image::value_image_lines::value_image_lines<int>;
-	using simple_dim_t = ML::image::value_image_lines::value_image_lines_dimensions;
+	using namespace ML::image::value_image;
 
 	enum LAYER_TYPE {
 		NONE,
@@ -33,7 +25,7 @@ namespace ML::models::autoencoder_subimage {
 			mixing pixel-values from centered-NxN squares to centered-BxB squares.
 			(where N is non-zero and is divisible by A.)
 
-			this dramatically increases number of parameters,
+			this dramatically increases number of parameters compared to SPATIAL_MIX,
 			but may be capable of encoding information that ENCODE and SPATIAL_MIX struggle to.
 
 			an example use case would be adding channels and spatially-mixing,
@@ -63,28 +55,17 @@ namespace ML::models::autoencoder_subimage {
 
 	};
 
-	struct fw_target { float weight=0.0f; };
-	struct bp_target { float weight=0.0f, weight_error=0.0f; int output_neuron_index; };
-	struct fw_target_list {
-		int weights_per_output_neuron;
-		vector<fw_target> targets;
-	};
-	struct bp_target_list {
-		padded_image_i intervals;// postfix-intervals of targets belonging to each input-neuron.
-		vector<bp_target> targets;
-	};
-
 	struct input_neuron_offset_struct {
 		/*
 			each output-neuron reads from a similar arrangement of input-values (for example, an NxN square);
 			this arrangement is stored as a re-usable kernel of offsets.
 		*/
-		vector<int> kernel;
+		std::vector<int> kernel;
 		/*
 			each output-neuron may read from a different area of the input-image;
 			these offsets are meant to be combined with the kernel to get input-value indices.
 		*/
-		simple_image_i kernel_offsets;
+		value_image<int> kernel_offsets;
 	};
 
 	///*
