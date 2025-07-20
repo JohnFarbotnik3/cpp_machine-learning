@@ -5,6 +5,7 @@
 #include <map>
 #include "src/utils/random.cpp"
 #include "src/image/extra_image_types.cpp"
+#include "simd.cpp"
 
 namespace ML::models::autoencoder_subimage {
 	using ML::image::value_image::value_image_dimensions;
@@ -39,7 +40,7 @@ namespace ML::models::autoencoder_subimage {
 		int y0,y1;
 	};
 
-	struct read_coords { int x,y,c,i; };
+	struct read_coords { int x,y,c,iofs; };
 	struct read_pattern {
 		vector<read_coords> list;
 		read_pattern() = default;
@@ -100,12 +101,27 @@ namespace ML::models::autoencoder_subimage {
 			}
 			return read_coords{ 0, 0, 0, 0 };
 		}
+		bool is_in_read_bounds(const read_coords pos, const read_coords ofs, const interleaved_image_dimensions idim) {
+			const int ix = pos.x + ofs.x;
+			const int iy = pos.y + ofs.y;
+			return (
+				(ix >= 0) & (ix < idim.X) &
+				(iy >= 0) & (iy < idim.Y)
+			);
+		}
+		bool is_in_write_bounds(const read_coords pos, const read_coords ofs, image_bounds bounds_i) {
+			const int ix = pos.x + ofs.x;
+			const int iy = pos.y + ofs.y;
+			return (
+				(ix >= bounds_i.x0) & (ix < bounds_i.x1) &
+				(iy >= bounds_i.y0) & (iy < bounds_i.y1)
+			);
+		}
 	};
 
 	struct subimage {
 		value_image<float> biases;
 		value_image<float> biases_error;// accumulated error in biases during minibatch.
-		interleaved_image<float> signal;// image of signal values - used for backprop.
 		vector<float> weights;
 		vector<float> weights_error;
 		read_pattern kernel;
@@ -117,7 +133,6 @@ namespace ML::models::autoencoder_subimage {
 		subimage(const int X, const int Y, const int C, const int D, const layer_pattern pattern, const interleaved_image_dimensions idim, const image_bounds bounds_i, const image_bounds bounds_o) :
 			biases(X,Y,C),
 			biases_error(X,Y,C),
-			signal(X,Y,C,D),
 			kernel(pattern, idim),
 			bounds_i(bounds_i),
 			bounds_o(bounds_o)
@@ -137,41 +152,33 @@ namespace ML::models::autoencoder_subimage {
 			for(int x=0;x<weights.size();x++) weights[x] = distr_weight(gen32) * mult;
 		}
 
-		void foreward_propagate(const interleaved_image<float>& value_i, const interleaved_image<float>& value_o, const layer_pattern pattern) {
+		// TODO - if this doesnt work, write a non-SIMD reference implementation and test that first.
+		void foreward_propagate(const interleaved_image<float>& value_i, interleaved_image<float>& value_o, interleaved_image<float>& signal, const layer_pattern pattern) {
 			const interleaved_image_dimensions idim = value_i.dim;
 			const interleaved_image_dimensions odim = value_o.dim;
+			const int C = odim.C;
 			const int D = odim.D;
-			for(int y=0;y<biases.dim.Y;y++) {
-			for(int x=0;x<biases.dim.X;x++) {
-			for(int c=0;c<biases.dim.C;c++) {
-				const int out_n = biases.dim.get_offset(x, y, c);
-				const float bias = biases.data[out_n];
-
-				float sums = bias;// TODO - SIMD init.
-
-				// TODO - use read_pattern struct.
-
-				signal.data[out_n] = sum;// TODO - SIMD store
-			}}}
-
-			// OLD CODE --------------------------------------------------
-			const padded_dim_t idim = value_image_i.dim;
-			const simple_dim_t odim = value_image_o.dim;
-			const int WEIGHTS_PER_OUTPUT_NEURON = fw_offsets.kernel.size();
-
-			for(int out_n=0;out_n<odim.length();out_n++) {
-				const int kofs = fw_offsets.kernel_offsets.data[out_n];
+			assert(D == vec8f_LENGTH);
+			const int WEIGHTS_PER_OUTPUT_NEURON = kernel.list.size();
+			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
+			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
+			for(int oc=0;oc<C;oc++) {
+				const int out_n = biases.dim.get_offset(ox, oy, oc);
 				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
-				float sum = biases.data[out_n];
-				for(int x=0;x<WEIGHTS_PER_OUTPUT_NEURON;x++) {
-					const int in_n = fw_offsets.kernel[x] + kofs;
-					sum += weights[wofs + x] * value_image_i.data[in_n];
+				const float bias = biases.data[out_n];
+				vec8f sum = _mm256_set1_ps(bias);
+				const read_coords coords_offset = kernel.get_offset(pattern, idim, ox, oy, oc);
+				for(int w=0;w<WEIGHTS_PER_OUTPUT_NEURON;w++) {
+					const read_coords coords = kernel.list[w];
+					if(!kernel.is_in_read_bounds(coords, coords_offset, idim)) continue;
+					const float weight = weights[wofs + w];
+					const int iofs = coords.iofs + coords_offset.iofs;
+					sum = _mm256_fmadd_ps(_mm256_loadu_ps(value_i.data.data()+iofs), _mm256_set1_ps(weight), sum);
 				}
-				signal.data[out_n] = sum;
-			}
-			for(int out_n=0;out_n<odim.length();out_n++) {
-				value_image_o.data[out_n] = activation_func(signal.data[out_n]);
-			}
+				const int oofs = value_o.dim.get_offset(ox, oy, oc);
+				_mm256_storeu_ps(signal .data.data() + oofs, sum);
+				_mm256_storeu_ps(value_o.data.data() + oofs, simd_activation_func(sum));
+			}}}
 		}
 
 		void backward_propagate() {

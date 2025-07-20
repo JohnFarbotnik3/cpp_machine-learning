@@ -4,6 +4,7 @@
 
 #include <vector>
 #include "src/image/value_image_lines.cpp"
+#include "simd.cpp"
 
 namespace ML::models::autoencoder_subimage {
 	using namespace ML::image::value_image;
@@ -87,6 +88,23 @@ namespace ML::models::autoencoder_subimage {
 		if(mag < 2.00f) return 0.3f;
 		return 0.1f;
 	}
+
+	vec8f simd_activation_func(vec8f signal) {
+		const vec8f mag = simd_abs(signal);
+		vec8f mult = _mm256_set1_ps(1.0f);
+		mult = simd_gte_cmov(mag, 0.25f, 0.7f, mult);
+		mult = simd_gte_cmov(mag, 0.50f, 0.5f, mult);
+		mult = simd_gte_cmov(mag, 1.00f, 0.3f, mult);
+		mult = simd_gte_cmov(mag, 2.00f, 0.1f, mult);
+		vec8f ofs = _mm256_set1_ps(0.0f);
+		ofs = simd_gte_cmov(mag, 0.25f, 0.075f, ofs);
+		ofs = simd_gte_cmov(mag, 0.50f, 0.175f, ofs);
+		ofs = simd_gte_cmov(mag, 1.00f, 0.375f, ofs);
+		ofs = simd_gte_cmov(mag, 2.00f, 0.775f, ofs);
+		const vec8f product = _mm256_fmadd_ps(mag,  mult, ofs);
+		return simd_gte_cmov(signal, _mm256_set1_ps(0.0f), product, simd_negative(product));
+	}
+	void simd_activation_derivative(const float* dst, const float* src, const int len) {}//TODO
 	//*/
 
 	/*

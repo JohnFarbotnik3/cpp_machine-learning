@@ -243,23 +243,22 @@ of using caching.
 this will prevent mixing across subimage boundaries but would simplfy code.
 * separate sample bounds from sample-image.
 * allow providing value ranges to sample images so they can be generated with the appropriate values upfront.
-*** interleaved history/batched images: combine <H> images into single interleaved image;
+*** interleaved history/batched images: combine <D> images into single interleaved image;
 history images can be similarly interleaved. this will reduce impact of scatter-style backprop,
-and has *significant* SIMD potential since same bias/weight can be used across <H> operations.
-^ pixel data order: Y, X, C, H.
+and has *significant* SIMD potential since same bias/weight can be used across <D> operations.
+^ pixel data order: Y, X, C, D.
 ^ the content of "patterns.cpp" would then be reasonable to hardcode into foreward-prop and back-prop;
 allowing removal of read-offset-kernel and kernel-offsets-image.
 (first examine performance impact of inlining it WITHOUT the interleaved-images and SIMD).
 ^ this will require packing and unpacking data to/from base image types.
-^ tiled-image format can be removed - and the padded, interleaved-lines, and interleaved-padded images
-only need structs to be defined (the iterators and extra stuff is not needed).
-^ add "alignas" so that image data can be loaded directly for SIMD operations (figure out how to get ideal SIMD alginment width).
 ^ in theory, batch-error may not be needed if batch size is equal to interleaved image count,
 as batch-error can be applied to weights and biases in-place.
 ^ input-value-image and output-error-image can be passed directly to subimages for f/b-propagation,
 removing a copying step. without padded images, bounds checking will be needed again, but thats okay now.
 input-images will now need to be preserved by layers though.
 ** write SIMD version of activation function as well.
+^ read SIMD optimization guide, as there may be many very suboptimal things I am doing that I dont even know about.
+
 
 
 > add to journal:
