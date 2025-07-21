@@ -22,6 +22,14 @@ namespace ML::models::autoencoder_subimage {
 		int length() const { return Y*X*C; }
 		int row_length() const { return X*C; }
 		int pixel_length() const { return C; }
+
+		bool equals(const simd_image_8f_dimensions& other) const {
+			return (
+				(other.X == X) &
+				(other.Y == Y) &
+				(other.C == C)
+			);
+		}
 	};
 	struct simd_image_8f {
 		vector<vec8f> data;

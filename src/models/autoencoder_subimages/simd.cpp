@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdint>
 #include <immintrin.h>
+#include <thread>
 
 namespace ML::models::autoencoder_subimage {
 
@@ -42,11 +43,11 @@ namespace ML::models::autoencoder_subimage {
 
 
 	bool simd_eq(vec8f a, vec8f b) {
-		vec8f mask = _mm256_cmp_ps(a, b, _CMP_EQ_OS);
 		uint32_t data[vec8f_LENGTH];
-		_mm256_storeu_ps((float*)data, mask);
-		for(int x=0;x<vec8f_LENGTH;x++) if(data[x] == 0) return false;
-		return true;
+		_mm256_storeu_ps((float*)data, _mm256_cmp_ps(a, b, _CMP_NEQ_OS));
+		uint32_t result = 0;
+		for(int x=0;x<vec8f_LENGTH;x++) result |= data[x];
+		return result == 0;
 	}
 	float simd_reduce(vec8f a) {
 		float data[vec8f_LENGTH];
@@ -54,6 +55,40 @@ namespace ML::models::autoencoder_subimage {
 		float sum = 0;
 		for(int x=0;x<vec8f_LENGTH;x++) sum += data[x];
 		return sum;
+	}
+	float simd_reduce(const vec8f* data, const size_t len) {
+		vec8f sum = simd_value(0);
+		for(int x=0;x<len;x++) sum = _mm256_add_ps(sum, data[x]);
+		return simd_reduce(sum);
+	}
+	void simd_reduce_mt_func(const vec8f* data, const size_t len, float& result) {
+		result = simd_reduce(data, len);
+	}
+	float simd_reduce_mt(const vec8f* data, const size_t len, const int n_threads) {
+		float results[n_threads];
+		std::thread threads[n_threads];
+		for(int x=0;x<n_threads;x++) {
+			const int b = ((x+0) * len) / n_threads;
+			const int e = ((x+1) * len) / n_threads;
+			threads[x] = std::thread(simd_reduce_mt_func, data+b, e-b, std::ref(results[x]));
+		}
+		for(int x=0;x<n_threads;x++) threads[x].join();
+		float sum = 0;
+		for(int x=0;x<n_threads;x++) sum += results[x];
+		return sum;
+	}
+	void simd_scale_mt_func(vec8f* data, const size_t len, float mult) {
+		vec8f m = _mm256_set1_ps(mult);
+		for(int x=0;x<len;x++) data[x] = _mm256_mul_ps(data[x], m);
+	}
+	void simd_scale_mt(vec8f* data, const size_t len, const int n_threads, float mult) {
+		std::thread threads[n_threads];
+		for(int x=0;x<n_threads;x++) {
+			const int b = ((x+0) * len) / n_threads;
+			const int e = ((x+1) * len) / n_threads;
+			threads[x] = std::thread(simd_scale_mt_func, data+b, e-b, mult);
+		}
+		for(int x=0;x<n_threads;x++) threads[x].join();
 	}
 }
 
