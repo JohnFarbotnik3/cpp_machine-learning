@@ -1,10 +1,26 @@
 
+#ifndef F_simd_cpp
+#define F_simd_cpp
+
+#include <cassert>
+#include <cstdint>
 #include <immintrin.h>
 
 namespace ML::models::autoencoder_subimage {
-	//using _mm256_add_ps
+
 	using vec8f = __m256;
 	const int vec8f_LENGTH = 8;
+
+
+	vec8f simd_value(const float value) {
+		return _mm256_set1_ps(value);
+	}
+	vec8f simd_loadu(const float* src) {
+		return _mm256_loadu_ps(src);
+	}
+	void simd_storeu(float* dst, vec8f src) {
+		_mm256_storeu_ps(dst, src);
+	}
 
 
 	vec8f simd_gte_cmov(vec8f a, vec8f b, vec8f va, vec8f vb) {
@@ -23,27 +39,25 @@ namespace ML::models::autoencoder_subimage {
 	vec8f simd_abs(vec8f a) {
 		return simd_gte_cmov(a, _mm256_set1_ps(0.0f), a, simd_negative(a));
 	}
-
-
-	void simd_load(vec8f* dst, const int simd_len, const float* src) {
-		for(int x=0;x<simd_len;x++) dst[x] = _mm256_loadu_ps(src + (x*vec8f_LENGTH));
-	}
-	void simd_store(const vec8f* src, const int simd_len, float* dst) {
-		for(int x=0;x<simd_len;x++) _mm256_storeu_ps(dst + (x*vec8f_LENGTH), src[x]);
-	}
-	void simd_fill(vec8f* dst, const int simd_len, const float value) {
-		for(int x=0;x<simd_len;x++) dst[x] = _mm256_set1_ps(value);
+	void simd_incr(vec8f& a, const vec8f b) {
+		a = _mm256_add_ps(a, b);
 	}
 
 
-	void simd_mult_accumulate(vec8f* dst, const int simd_len, const float* values, const float mult) {
-		for(int x=0;x<simd_len;x++) {
-			dst[x] = _mm256_fmadd_ps(
-				_mm256_loadu_ps(values + (x*vec8f_LENGTH)),
-				_mm256_set1_ps(mult),
-				dst[x]
-			);
-		}
+	bool simd_eq(vec8f a, vec8f b) {
+		vec8f mask = _mm256_cmp_ps(a, b, _CMP_EQ_OS);
+		uint32_t data[vec8f_LENGTH];
+		_mm256_storeu_ps((float*)data, mask);
+		for(int x=0;x<vec8f_LENGTH;x++) if(data[x] == 0) return false;
+		return true;
 	}
-
+	float simd_reduce(vec8f a) {
+		float data[vec8f_LENGTH];
+		_mm256_storeu_ps(data, a);
+		float sum = 0;
+		for(int x=0;x<vec8f_LENGTH;x++) sum += data[x];
+		return sum;
+	}
 }
+
+#endif

@@ -258,7 +258,8 @@ removing a copying step. without padded images, bounds checking will be needed a
 input-images will now need to be preserved by layers though.
 ** write SIMD version of activation function as well.
 ^ read SIMD optimization guide, as there may be many very suboptimal things I am doing that I dont even know about.
-
+^ create simd_buffer class for storing data, and for using as a target for SIMD operations.
+^ align memory of image types to "alignment_of(vecXf)", then use load() operations instead of loadu().
 
 
 > add to journal:

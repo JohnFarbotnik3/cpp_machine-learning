@@ -104,7 +104,7 @@ namespace ML::models::autoencoder_subimage {
 		const vec8f product = _mm256_fmadd_ps(mag,  mult, ofs);
 		return simd_gte_cmov(signal, _mm256_set1_ps(0.0f), product, simd_negative(product));
 	}
-	void simd_activation_derivative(const float* dst, const float* src, const int len) {}//TODO
+	vec8f simd_activation_derivative(vec8f signal) {}//TODO
 	//*/
 
 	/*
