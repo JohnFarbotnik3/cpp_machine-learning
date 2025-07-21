@@ -2,13 +2,10 @@
 #include <cassert>
 #include <random>
 #include <thread>
-#include "src/utils/vector_util.cpp"
 #include "types.cpp"
 #include "subimage.cpp"
 
 namespace ML::models::autoencoder_subimage {
-	using namespace utils::vector_util;
-
 	struct ae_layer {
 		vector<subimage> subimages;
 		int subimage_grid_X;// number of subimages along X-axis.

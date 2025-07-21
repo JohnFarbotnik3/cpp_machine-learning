@@ -9,7 +9,6 @@
 #include "src/image/value_image_lines.cpp"
 #include "src/stats.cpp"
 #include "src/models/autoencoder_subimages/ae_model.cpp"
-#include "src/models/autoencoder_subimages/types.cpp"
 
 /*
 debug build:
@@ -55,12 +54,11 @@ using std::vector;
 using timepoint = ML::stats::timepoint;
 namespace fs = std::filesystem;
 using model_t = ML::models::autoencoder_subimage::ae_model;
-using model_image_t = ML::image::value_image_lines::value_image_lines<float>;
-using image_dim_t = ML::image::value_image_lines::value_image_lines_dimensions;
+using model_image_t = ML::models::autoencoder_subimage::simd_image_8f;
+using image_dim_t = ML::models::autoencoder_subimage::simd_image_8f_dimensions;
 using file_image_t = ML::image::file_image;
-using ML::image::value_image_lines::sample_bounds;
+using ML::image::value_image::sample_bounds;
 using namespace ML::models::autoencoder_subimage;
-
 
 struct training_settings {
 	vector<fs::directory_entry> image_entries;
@@ -83,9 +81,9 @@ void print_usage(string msg) {
 }
 
 
-// TODO - move this functionality into sample generating function instead.
+/*
 sample_bounds generate_sample_image_normalized(model_image_t& sample, const file_image_t& image, const int n_threads) {
-	sample_bounds bounds = ML::image::value_image_lines::generate_sample_image(sample, image);
+	sample_bounds bounds = ML::image::value_image::generate_sample_image(sample, image);
 	for(int y=bounds.y0;y<bounds.y1;y++) {
 	for(int x=bounds.x0;x<bounds.x1;x++) {
 	for(int c=0;c<sample.dim.C;c++) {
@@ -94,79 +92,76 @@ sample_bounds generate_sample_image_normalized(model_image_t& sample, const file
 	}}}
 	return bounds;
 }
-
-// TODO - move this functionality into sample generating function instead.
 file_image_t to_file_image_normalized(const model_image_t& sample, const sample_bounds bounds, const bool clamp_to_sample_area, const int n_threads) {
 	model_image_t temp = sample;
 	utils::vector_util::vec_fma_mt<float>(temp.data, 1.0f, +0.5f, 0, temp.data.size(), n_threads);
 	return ML::image::value_image_lines::to_file_image(temp, bounds, clamp_to_sample_area);
 }
-
-/*
-	WARNING: loss_squared can lead to error-concentration which causes models to explode
-	when training is going well and they are very close to 0 average error.
 */
-void generate_error_image(const simple_image_f& input, const simple_image_f& output, simple_image_f& error, const sample_bounds bounds, float loss_power, bool clamp_error) {
+
+void generate_error_image(simd_image_8f& error, const simd_image_8f& input, const simd_image_8f& output, const sample_bounds* bounds, const int N) {
 	assert(output.dim.equals(input.dim));
 	assert(output.dim.equals(error.dim));
 	assert(output.dim.length() > 0);
-	assert(bounds.x1 > bounds.x0);
-	assert(bounds.y1 > bounds.y0);
+	assert(0 <= N && N <= 8);
+	const simd_image_8f_dimensions dim = output.dim;
 
-	error.clear();
-
-	// sample area bounds.
-	const int ix0 = bounds.x0;
-	const int iy0 = bounds.y0;
-	const int ix1 = bounds.x1;
-	const int iy1 = bounds.y1;
-	const int ic0 = 0;
-	const int ic1 = input.dim.C;
-
-	if(loss_power != 1.0f) {
-		float sum_e1 = 0;
-		float sum_e2 = 0;
-		for(int iy=iy0;iy<iy1;iy++) {
-		for(int ix=ix0;ix<ix1;ix++) {
-		for(int ic=ic0;ic<ic1;ic++) {
-			const int i = error.dim.get_offset(ix, iy, ic);
-			const float e1 = input.data[i] - output.data[i];
-			const float e2 = std::pow(std::abs(e1), loss_power) * (e1 >= 0.0f ? 1.0f : -1.0f);
-			error.data[i] = e2;
-			sum_e1 += e1;
-			sum_e2 += e2;
-		}}}
-		// normalize to match original total error.
-		float mult = sum_e1 / sum_e2;
-		for(int iy=iy0;iy<iy1;iy++) {
-		for(int ix=ix0;ix<ix1;ix++) {
-		for(int ic=ic0;ic<ic1;ic++) {
-			const int i = error.dim.get_offset(ix, iy, ic);
-			error.data[i] *= mult;
-		}}}
-	} else {
-		for(int iy=iy0;iy<iy1;iy++) {
-		for(int ix=ix0;ix<ix1;ix++) {
-		for(int ic=ic0;ic<ic1;ic++) {
-			const int i = error.dim.get_offset(ix, iy, ic);
-			error.data[i] = input.data[i] - output.data[i];
-		}}}
+	// load bounds into SIMD registers.
+	vec8f x0 = _mm256_set1_ps(0);
+	vec8f x1 = _mm256_set1_ps(0);
+	vec8f y0 = _mm256_set1_ps(0);
+	vec8f y1 = _mm256_set1_ps(0);
+	for(int n=0;n<N;n++) {
+		x0[n] = bounds[n].x0;
+		x1[n] = bounds[n].x1;
+		y0[n] = bounds[n].y0;
+		y1[n] = bounds[n].y1;
 	}
 
-	if(clamp_error) {
-		for(int iy=iy0;iy<iy1;iy++) {
-		for(int ix=ix0;ix<ix1;ix++) {
-		for(int ic=ic0;ic<ic1;ic++) {
-			const int i = error.dim.get_offset(ix, iy, ic);
-			error.data[i] = std::clamp(error.data[i], -1.0f, 1.0f);
-		}}}
-	}
+	// compute error.
+	const vec8f zero = _mm256_setzero_ps();
+	for(int y=0;y<dim.Y;y++) {
+	for(int x=0;x<dim.X;x++) {
+		// get bitmask containing 1's if image[n] is in bounds, and 0's otherwise.
+		vec8f mx0 = _mm256_cmp_ps(_mm256_set1_ps(x), x0, _CMP_GE_OS);
+		vec8f mx1 = _mm256_cmp_ps(_mm256_set1_ps(x), x1, _CMP_LT_OS);
+		vec8f my0 = _mm256_cmp_ps(_mm256_set1_ps(y), y0, _CMP_GE_OS);
+		vec8f my1 = _mm256_cmp_ps(_mm256_set1_ps(y), y1, _CMP_LT_OS);
+		vec8f mask = _mm256_and_ps(_mm256_and_ps(mx0, mx1), _mm256_and_ps(my0, my1));
+
+		for(int c=0;c<dim.C;c++) {
+			const int iofs = dim.get_offset(x, y, c);
+			const vec8f diff = _mm256_sub_ps(input.data[x], output.data[x]);
+			// error = in_bounds ? (input - output) : 0
+			error.data[x] = _mm256_blendv_ps(zero, diff, mask);
+			// TODO - sum error?
+			// TODO - clamp error?
+		}
+	}}
 }
 
+struct batch_iterator {
+	std::mt19937 gen32;
+	vector<fs::directory_entry> image_entries;
+	vector<int> order;
+	int index;
+
+	batch_iterator(const vector<fs::directory_entry> image_entries) : image_entries(image_entries) { reset(); }
+	void reset() {
+		order = utils::random::generate_shuffle_mapping(gen32, image_entries.size());
+		index = 0;
+	}
+	fs::directory_entry next() {
+		if(index == order.size()) reset();
+		return image_entries[order[index++]];
+	}
+};
 
 void training_cycle(model_t& model, training_settings& settings) {
 	settings.cycle++;
 	// divide image entries into batches.
+	// TODO - use batch iterator instead.
+	/*
 	vector<fs::directory_entry> pool = settings.image_entries;
 	vector<vector<fs::directory_entry>> image_minibatches;
 	while(pool.size() > 0) {
@@ -181,6 +176,7 @@ void training_cycle(model_t& model, training_settings& settings) {
 		}
 		image_minibatches.push_back(minibatch);
 	}
+	*/
 
 	// run training cycle.
 	model_image_t image_input (model.image_dimensions);

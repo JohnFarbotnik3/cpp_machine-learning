@@ -1,17 +1,13 @@
 
 #include <cassert>
 #include <vector>
-#include <algorithm>
-#include "src/image/value_image_lines.cpp"
 #include "src/utils/random.cpp"
 #include "src/utils/simd.cpp"
-#include "src/utils/vector_util.cpp"
 #include "./ae_layer.cpp"
 
 namespace ML::models::autoencoder_subimage {
 	using std::vector;
 	using namespace ML::image;
-	using namespace utils::vector_util;
 	using dimensions_t = simd_image_8f_dimensions;
 
 	struct ae_model {

@@ -63,6 +63,10 @@ namespace ML::image::value_image {
 		int x0, x1;
 		int y0, y1;
 	};
+	struct sample_range {
+		float min;
+		float max;
+	};
 
 	void sample_area_copy(value_image<float>& sample, const file_image& image, const sample_bounds bounds) {
 		assert((bounds.x1 - bounds.x0) == image.X);
@@ -70,20 +74,18 @@ namespace ML::image::value_image {
 		assert(sample.dim.C == image.C);
 		sample.clear();
 
-		const float m = 1.0f / 255.0f;
 		for(int iy=0;iy<image.Y;iy++) {
 		for(int ix=0;ix<image.X;ix++) {
 		for(int ic=0;ic<image.C;ic++) {
 			const int iofs = image.get_offset(ix, iy, ic);
 			const int sofs = sample.dim.get_offset(ix+bounds.x0, iy+bounds.y0, ic);
-			sample.data[sofs] = image.data[iofs] * m;
+			sample.data[sofs] = image.data[iofs];
 		}}}
 	}
 
 	void sample_area_nearest_neighbour(value_image<float>& sample, const file_image& image, const sample_bounds bounds) {
 		sample.clear();
 
-		const float m = 1.0f / 255.0f;
 		const float x_inv_scale_factor = float(image.X) / float(bounds.x1 - bounds.x0);
 		const float y_inv_scale_factor = float(image.Y) / float(bounds.y1 - bounds.y0);
 		for(int sy=bounds.y0;sy<bounds.y1;sy++) {
@@ -94,7 +96,7 @@ namespace ML::image::value_image {
 			const int ic = sc;
 			const int iofs = image.get_offset(ix, iy, ic);
 			const int sofs = sample.dim.get_offset(sx, sy, sc);
-			sample.data[sofs] = image.data[iofs] * m;
+			sample.data[sofs] = image.data[iofs];
 		}}}
 	}
 
@@ -122,7 +124,6 @@ namespace ML::image::value_image {
 			for(int p=0;p<int_to_float.size();p++) int_to_float[p] = float(p);
 		}
 
-		const float m = 1.0f / 255.0f;
 		for(int sy=bounds.y0;sy<bounds.y1;sy++) {
 		for(int sx=bounds.x0;sx<bounds.x1;sx++) {
 			int bx = sx - bounds.x0;
@@ -171,7 +172,7 @@ namespace ML::image::value_image {
 				assert(value_sums[sc] >=   0.00f);
 				assert(value_sums[sc] <= 255.01f);
 				const int sofs = sample.dim.get_offset(sx, sy, sc);
-				sample.data[sofs] = value_sums[sc] * m;
+				sample.data[sofs] = value_sums[sc];
 			}
 		}}
 	}
@@ -186,7 +187,7 @@ namespace ML::image::value_image {
 		values outside the sample area are set to 0 and are ignored
 		when computing error.
 	*/
-	sample_bounds generate_sample_image(value_image<float>& sample, const file_image& image) {
+	sample_bounds generate_sample_image(value_image<float>& sample, const file_image& image, const sample_range range) {
 		const int sample_X = sample.dim.X;
 		const int sample_Y = sample.dim.Y;
 		sample_bounds bounds;
@@ -229,6 +230,14 @@ namespace ML::image::value_image {
 			sample_area_linear(sample, image, bounds);
 		}
 
+		// scale image to given range.
+		const float mult = (range.max - range.min) / 255.0f;
+		for(int y=bounds.y0;y<bounds.y1;y++) {
+		for(int x=bounds.x0;x<bounds.x1;x++) { const int sofs = sample.dim.get_offset(x, y, 0);
+		for(int c=0;c<sample.dim.C;c++) {
+			sample.data[sofs+c] = sample.data[sofs+c] * mult + range.min;
+		}}}
+
 		return bounds;
 	};
 
@@ -238,8 +247,8 @@ namespace ML::image::value_image {
 		which would explain why error rate was low even with very wrong pixels in output files.
 		- however using unclamped conversion can reveal bugs in sampling algorithm.
 	*/
-	file_image to_file_image(value_image<float>& sample, const sample_bounds bounds, bool crop_to_sample_area) {
-		const float m = 255.0f / 1.0f;
+	file_image to_file_image(value_image<float>& sample, const sample_bounds bounds, const sample_range range, bool crop_to_sample_area) {
+		const float mult = (range.max - range.min) * 255.0f;
 		if(crop_to_sample_area) {
 			file_image image;
 			image.X = bounds.x1 - bounds.x0;
@@ -251,7 +260,7 @@ namespace ML::image::value_image {
 			for(int sc=0;sc<sample.dim.C;sc++) {
 				const int iofs = image.get_offset(sx-bounds.x0, sy-bounds.y0, sc);
 				const int sofs = sample.dim.get_offset(sx, sy, sc);
-				image.data[iofs] = std::clamp(sample.data[sofs], 0.0f, 1.0f) * m;
+				image.data[iofs] = (std::clamp(sample.data[sofs], 0.0f, 1.0f) - range.min) * mult;
 			}}}
 			return image;
 		} else {
@@ -265,7 +274,7 @@ namespace ML::image::value_image {
 			for(int sc=0;sc<image.C;sc++) {
 				const int iofs = image.get_offset(sx, sy, sc);
 				const int sofs = sample.dim.get_offset(sx, sy, sc);
-				image.data[iofs] = std::clamp(sample.data[sofs], 0.0f, 1.0f) * m;
+				image.data[iofs] = (std::clamp(sample.data[sofs], 0.0f, 1.0f) - range.min) * mult;
 			}}}
 			return image;
 		}

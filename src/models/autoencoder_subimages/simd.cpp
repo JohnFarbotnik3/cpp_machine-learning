@@ -27,15 +27,15 @@ namespace ML::models::autoencoder_subimage {
 		return simd_gte_cmov(a, _mm256_set1_ps(b), _mm256_set1_ps(va), vb);
 	}
 	vec8f simd_negative(vec8f a) {
-		return _mm256_sub_ps(_mm256_set1_ps(0.0f), a);
+		return _mm256_sub_ps(_mm256_setzero_ps(), a);
 	}
 	vec8f simd_sign(vec8f a) {
-		return simd_gte_cmov(a, _mm256_set1_ps(0.0f), _mm256_set1_ps(1.0f), _mm256_set1_ps(-1.0f));
+		return simd_gte_cmov(a, _mm256_setzero_ps(), _mm256_set1_ps(1.0f), _mm256_set1_ps(-1.0f));
 	}
 	vec8f simd_abs(vec8f a) {
 		// TODO - try clearing the sign bits instead.
 		// https://stackoverflow.com/questions/23847377/how-does-this-function-compute-the-absolute-value-of-a-float-through-a-not-and-a
-		return simd_gte_cmov(a, _mm256_set1_ps(0.0f), a, simd_negative(a));
+		return simd_gte_cmov(a, _mm256_setzero_ps(), a, simd_negative(a));
 	}
 	void simd_incr(vec8f& a, const vec8f b) {
 		a = _mm256_add_ps(a, b);

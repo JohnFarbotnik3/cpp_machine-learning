@@ -1,9 +1,12 @@
 
 #include <vector>
 #include "simd.cpp"
+#include "src/image/value_image.cpp"
 
 namespace ML::models::autoencoder_subimage {
 	using std::vector;
+	using ML::image::value_image::value_image;
+	using ML::image::value_image::sample_bounds;
 
 	struct simd_image_8f_dimensions {
 		int X;// image width.
@@ -42,9 +45,24 @@ namespace ML::models::autoencoder_subimage {
 		void clear() { data.assign(data.size(), simd_value(0)); }
 
 		// pack multiple images into simd image.
-		void pack() {}// TODO
+		void pack(const value_image<float>* images, const int N) {
+			assert(0 <= N && N <= 8);
+			float values[8];
+			for(int n=0;n<8;n++) values[n] = 0;
+			for(int x=0;x<dim.length();x++) {
+				for(int n=0;n<N;n++) values[n] = images[n].data[x];
+				data[x] = _mm256_loadu_ps(values);
+			}
+		}
 
 		// unpack multiple images from simd image.
-		void unpack() {}// TODO
+		void unpack(value_image<float>* images, const int N) {
+			assert(0 <= N && N <= 8);
+			float values[8];
+			for(int x=0;x<dim.length();x++) {
+				_mm256_storeu_ps(values, data[x]);
+				for(int n=0;n<N;n++) images[n].data[x] = values[n];
+			}
+		}
 	};
 };
