@@ -10,219 +10,48 @@ namespace ML::models::autoencoder_subimage {
 	using namespace utils::vector_util;
 
 	struct ae_layer {
-		layer_pattern pattern;
-		simple_dim_t idim;// overall dimensions of input.
-		simple_dim_t odim;// overall dimensions of output.
-		padded_dim_t subidim;// input  dimensions of subimages.
-		simple_dim_t subodim;// output dimensions of subimages.
 		vector<subimage> subimages;
 		int subimage_grid_X;// number of subimages along X-axis.
 		int subimage_grid_Y;// number of subimages along Y-axis.
+		layer_pattern pattern;
+		simd_image_8f value_o;
+		simd_image_8f signal_o;
+		simd_image_8f error_o;
 
-		ae_layer(const simple_dim_t idim, const simple_dim_t odim, const layer_pattern pattern, const int grid_X, const int grid_Y) :
-			idim(idim), odim(odim), pattern(pattern), subimage_grid_X(grid_X), subimage_grid_Y(grid_Y)
-		{
+		ae_layer(
+			const simd_image_8f_dimensions idim,
+			const simd_image_8f_dimensions odim,
+			const int grid_X,
+			const int grid_Y,
+			const layer_pattern pattern
+		) {
+			this->pattern = pattern;
+			this->subimage_grid_X = grid_X;
+			this->subimage_grid_Y = grid_Y;
+
 			// assert that image cleanly divides into subimages.
 			assert(idim.X % grid_X == 0);
 			assert(idim.Y % grid_Y == 0);
 			assert(odim.X % grid_X == 0);
 			assert(odim.Y % grid_Y == 0);
 
-			// determine amount of padding.
-			const int A = pattern.A;
-			const int B = pattern.B;
-			const int N = pattern.N;
-			int pad = 0;
-			if(pattern.type == LAYER_TYPE::DENSE) {
-				assert(odim.equals(idim));
-			}
-			if(pattern.type == LAYER_TYPE::ENCODE) {
-				assert((odim.X / B) == (idim.X / A));
-				assert((odim.Y / B) == (idim.Y / A));
-			}
-			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) {
-				assert(odim.equals(idim));
-				assert((N - B) % 2 == 0);
-				pad = (N/2) - (B/2);
-			}
-			if(pattern.type == LAYER_TYPE::ENCODE_MIX) {
-				assert((odim.X / B) == (idim.X / A));
-				assert((odim.Y / B) == (idim.Y / A));
-				assert((N - A) % 2 == 0);
-				pad = (N/2) - (A/2);
-			}
-
 			// create grid of subimages.
-			subidim = padded_dim_t(idim.X/grid_X, idim.Y/grid_Y, idim.C, pad);
-			subodim = simple_dim_t(odim.X/grid_X, odim.Y/grid_Y, odim.C);
+			subodim = value_image_dimensions(odim.X/grid_X, odim.Y/grid_Y, odim.C);
 			for(int y=0;y<grid_Y;y++) {
 			for(int x=0;x<grid_X;x++) {
-				subimages.push_back(subimage(subidim, subodim, pattern));
+				image_bounds bounds_i;
+				bounds_i.x0 = ((x+0) * idim.X) / grid_X;
+				bounds_i.x1 = ((x+1) * idim.X) / grid_X;
+				bounds_i.y0 = ((y+0) * idim.Y) / grid_Y;
+				bounds_i.y1 = ((y+1) * idim.Y) / grid_Y;
+				image_bounds bounds_o;
+				bounds_o.x0 = ((x+0) * odim.X) / grid_X;
+				bounds_o.x1 = ((x+1) * odim.X) / grid_X;
+				bounds_o.y0 = ((y+0) * odim.Y) / grid_Y;
+				bounds_o.y1 = ((y+1) * odim.Y) / grid_Y;
+				subimages.push_back(subimage(pattern, idim, subodim, bounds_i, bounds_o));
 			}}
 		}
-
-		// ============================================================
-		// subimage manipulation.
-		// ------------------------------------------------------------
-
-		static void subimage_load(const simple_image_f& img, simple_image_f& sub, const int image_x0, const int image_y0) {
-			const simple_dim_t imgdim = img.dim;
-			const simple_dim_t subdim = sub.dim;
-			const int ch = img.dim.C;
-			      float* subdata = sub.data.data();
-			const float* imgdata = img.data.data();
-
-			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.X;
-			for(int sy=0;sy<subdim.Y;sy++) {
-				const int i0 = imgdim.get_offset(image_x0, image_y0+sy, 0);
-				const int s0 = subdim.get_offset(0, sy, 0);
-				memcpy(subdata+s0, imgdata+i0, ROW_SZ);
-			}
-		}
-		static void subimage_load_inner(const simple_image_f& img, padded_image_f& sub, const int image_x0, const int image_y0) {
-			const simple_dim_t imgdim = img.dim;
-			const padded_dim_t subdim = sub.dim;
-			const int ch = img.dim.C;
-			      float* subdata = sub.data.data();
-			const float* imgdata = img.data.data();
-
-			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.innerX();
-			for(int sy=0;sy<subdim.innerY();sy++) {
-				const int i0 = imgdim.get_offset(image_x0, image_y0+sy, 0);
-				const int s0 = subdim.get_offset_padded(0, sy, 0);
-				memcpy(subdata+s0, imgdata+i0, ROW_SZ);
-			}
-		}
-		static void subimage_load_outer(const simple_image_f& img, padded_image_f& sub, const int image_x0, const int image_y0) {
-			if(sub.dim.pad == 0) return;// skip if no padding.
-
-			const simple_dim_t imgdim = img.dim;
-			const padded_dim_t subdim = sub.dim;
-			const int ch = img.dim.C;
-			      float* subdata = sub.data.data();
-			const float* imgdata = img.data.data();
-
-			// load padding part of subimage.
-			const int pad = subdim.pad;
-			const int PIXEL_SZ = sizeof(imgdata[0]) * ch;
-			for(int sy=-pad;sy<subdim.innerY()+pad;sy++) {
-			for(int sx=-pad;sx<subdim.innerX()+pad;sx++) {
-				// NOTE: skip to end of inner-row when arriving at start of inner-row.
-				if(subdim.is_within_inner_bounds(sx, sy) && sx==0) sx=subdim.innerX();
-				const int ix = image_x0 + sx;
-				const int iy = image_y0 + sy;
-				if(imgdim.is_within_bounds(ix, iy)) {
-					const int i0 = imgdim.get_offset(ix, iy, 0);
-					const int s0 = subdim.get_offset_padded(sx, sy, 0);
-					memcpy(subdata+s0, imgdata+i0, PIXEL_SZ);
-				}
-			}}
-		}
-		static void subimage_save(simple_image_f& img, const simple_image_f& sub, const int image_x0, const int image_y0) {
-			const simple_dim_t imgdim = img.dim;
-			const simple_dim_t subdim = sub.dim;
-			const int ch = img.dim.C;
-			const float* subdata = sub.data.data();
-			      float* imgdata = img.data.data();
-
-			// save inner part of subimage.
-			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.X;
-			for(int sy=0;sy<subdim.Y;sy++) {
-				const int i0 = imgdim.get_offset(image_x0, image_y0+sy, 0);
-				const int s0 = subdim.get_offset(0, sy, 0);
-				memcpy(imgdata+i0, subdata+s0, ROW_SZ);
-			}
-		}
-		static void subimage_save_inner(simple_image_f& img, const padded_image_f& sub, const int image_x0, const int image_y0) {
-			const simple_dim_t imgdim = img.dim;
-			const padded_dim_t subdim = sub.dim;
-			const int ch = img.dim.C;
-			const float* subdata = sub.data.data();
-			      float* imgdata = img.data.data();
-
-			// save inner part of subimage.
-			const int ROW_SZ = sizeof(imgdata[0]) * ch * subdim.innerX();
-			for(int sy=0;sy<subdim.innerY();sy++) {
-				const int i0 = imgdim.get_offset(image_x0, image_y0+sy, 0);
-				const int s0 = subdim.get_offset_padded(0, sy, 0);
-				memcpy(imgdata+i0, subdata+s0, ROW_SZ);
-			}
-		}
-		static void subimage_save_outer(simple_image_f& img, const padded_image_f& sub, const int image_x0, const int image_y0) {
-			if(sub.dim.pad == 0) return;// skip if no padding.
-
-			const simple_dim_t imgdim = img.dim;
-			const padded_dim_t subdim = sub.dim;
-			const int ch = img.dim.C;
-			const float* subdata = sub.data.data();
-			      float* imgdata = img.data.data();
-
-			// save padding part of subimage.
-			// NOTE: this increments rather than overwrites content.
-			const int pad = subdim.pad;
-			for(int sy=-pad;sy<subdim.innerY()+pad;sy++) {
-			for(int sx=-pad;sx<subdim.innerX()+pad;sx++) {
-				// NOTE: skip to end of inner-row when arriving at start of inner-row.
-				if(subdim.is_within_inner_bounds(sx, sy) && sx==0) sx=subdim.innerX();
-				const int ix = image_x0 + sx;
-				const int iy = image_y0 + sy;
-				if(imgdim.is_within_bounds(ix, iy)) {
-					const int i0 = imgdim.get_offset(ix, iy, 0);
-					const int s0 = subdim.get_offset_padded(sx, sy, 0);
-					for(int c=0;c<ch;c++) imgdata[i0+c] += subdata[s0+c];
-				}
-			}}
-		}
-
-		void foreward_propagate_subimages_load(const simple_image_f& input_values) {
-			for(int gy=0;gy<subimage_grid_Y;gy++) {
-			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * input_values.dim.X) / subimage_grid_X;
-				const int image_y0 = (gy * input_values.dim.Y) / subimage_grid_Y;
-				padded_image_f& sub = subimages[gy*subimage_grid_X + gx].value_image_i;
-				subimage_load_inner(input_values, sub, image_x0, image_y0);
-				subimage_load_outer(input_values, sub, image_x0, image_y0);
-			}}
-		}
-		void foreward_propagate_subimages_save(simple_image_f& output_values) {
-			for(int gy=0;gy<subimage_grid_Y;gy++) {
-			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * output_values.dim.X) / subimage_grid_X;
-				const int image_y0 = (gy * output_values.dim.Y) / subimage_grid_Y;
-				const simple_image_f& sub = subimages[gy*subimage_grid_X + gx].value_image_o;
-				subimage_save(output_values, sub, image_x0, image_y0);
-			}}
-		}
-
-		void backward_propagate_subimages_load(const simple_image_f& output_error) {
-			for(int gy=0;gy<subimage_grid_Y;gy++) {
-			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * output_error.dim.X) / subimage_grid_X;
-				const int image_y0 = (gy * output_error.dim.Y) / subimage_grid_Y;
-				simple_image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_o;
-				subimage_load(output_error, sub, image_x0, image_y0);
-			}}
-		}
-		void backward_propagate_subimages_save(simple_image_f& input_error) {
-			for(int gy=0;gy<subimage_grid_Y;gy++) {
-			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * input_error.dim.X) / subimage_grid_X;
-				const int image_y0 = (gy * input_error.dim.Y) / subimage_grid_Y;
-				const padded_image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_i;
-				subimage_save_inner(input_error, sub, image_x0, image_y0);
-			}}
-			for(int gy=0;gy<subimage_grid_Y;gy++) {
-			for(int gx=0;gx<subimage_grid_X;gx++) {
-				const int image_x0 = (gx * input_error.dim.X) / subimage_grid_X;
-				const int image_y0 = (gy * input_error.dim.Y) / subimage_grid_Y;
-				const padded_image_f& sub = subimages[gy*subimage_grid_X + gx].error_image_i;
-				subimage_save_outer(input_error, sub, image_x0, image_y0);
-			}}
-		}
-
-		//TODO (but only if its worth the significant increase in complexity)
-		void foreward_propagate_subimages_load_middle(const ae_layer& prev_layer) {}
-		void backward_propagate_subimages_load_middle(const ae_layer& next_layer) {}
 
 		// ============================================================
 		// network functions
@@ -237,43 +66,41 @@ namespace ML::models::autoencoder_subimage {
 			}
 		}
 
-		static void propagate_func(ae_layer& layer, const int beg, const int end) {
-			for(int x=beg;x<end;x++) layer.subimages[x].foreward_propagate();
+		static void propagate_func(ae_layer& layer, const int beg, const int end, const simd_image_8f& value_i) {
+			for(int x=beg;x<end;x++) layer.subimages[x].foreward_propagate(value_i, layer.value_o, layer.signal_o);
 		}
-		void propagate(const int n_threads, const simple_image_f& input_values, simple_image_f& output_values) {
-			foreward_propagate_subimages_load(input_values);
+		void propagate(const int n_threads, const simd_image_8f& value_i) {
 			vector<std::thread> threads;
 			for(int z=0;z<n_threads;z++) {
 				const int beg = (subimages.size() * (z+0)) / n_threads;
 				const int end = (subimages.size() * (z+1)) / n_threads;
-				threads.push_back(std::thread(propagate_func, std::ref(*this), beg, end));
+				threads.push_back(std::thread(propagate_func, std::ref(*this), beg, end, std::ref(value_i)));
 			}
 			for(int z=0;z<n_threads;z++) threads[z].join();
-			foreward_propagate_subimages_save(output_values);
 		}
 
-		static void back_propagate_func(ae_layer& layer, const int beg, const int end) {
-			for(int x=beg;x<end;x++) layer.subimages[x].backward_propagate();
+		static void back_propagate_func(ae_layer& layer, const int beg, const int end, simd_image_8f& error_i, const simd_image_8f& value_i) {
+			for(int x=beg;x<end;x++) layer.subimages[x].backward_propagate(error_i, layer.error_o, value_i, layer.signal_o);
 		}
-		void back_propagate(const int n_threads, simple_image_f& input_error, const simple_image_f& output_error) {
-			backward_propagate_subimages_load(output_error);
+		void back_propagate(const int n_threads, simd_image_8f& error_i, const simd_image_8f& value_i) {
 			vector<std::thread> threads;
 			for(int z=0;z<n_threads;z++) {
 				const int beg = (subimages.size() * (z+0)) / n_threads;
 				const int end = (subimages.size() * (z+1)) / n_threads;
-				threads.push_back(std::thread(back_propagate_func, std::ref(*this), beg, end));
+				threads.push_back(std::thread(back_propagate_func, std::ref(*this), beg, end, std::ref(error_i), std::ref(value_i)));
 			}
 			for(int z=0;z<n_threads;z++) threads[z].join();
-			backward_propagate_subimages_save(input_error);
+			for(int x=0;x<subimages.size();x++) subimages[x].commit_extra_error(error_i);
 
 			// normalize input-error against output-error to have same average gradient per-neuron.
-			const float  in_sum = vec_sum_abs_mt( input_error.data, 0,  input_error.data.size(), n_threads);
-			const float out_sum = vec_sum_abs_mt(output_error.data, 0, output_error.data.size(), n_threads);
-			float mult = (out_sum / in_sum) * (float(input_error.data.size()) / float(output_error.data.size()));
+			// TODO
+			const float  in_sum = vec_sum_abs_mt(error_i.data, 0, error_i.data.size(), n_threads);
+			const float out_sum = vec_sum_abs_mt(error_o.data, 0, error_o.data.size(), n_threads);
+			float mult = (out_sum / in_sum) * (float(error_i.data.size()) / float(error_o.data.size()));
 			//printf("error: isum=%f, osum=%f\n", in_sum, out_sum);
 			assert(out_sum > 0.0f);
 			assert( in_sum > 0.0f);
-			vec_mult_mt(input_error.data, mult, 0, input_error.data.size(), n_threads);
+			vec_mult_mt(error_i.data, mult, 0, error_i.data.size(), n_threads);
 		}
 
 		static void apply_batch_error_biases_func(ae_layer& layer, const int beg, const int end, const float adjustment_rate) {

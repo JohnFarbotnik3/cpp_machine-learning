@@ -1,6 +1,6 @@
 
+#include "src/image/value_image_lines.cpp"
 #include "types.cpp"
-#include "patterns.cpp"
 #include <cassert>
 #include <map>
 #include "src/utils/random.cpp"
@@ -77,6 +77,7 @@ namespace ML::models::autoencoder_subimage {
 				}}}
 			}
 			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) {
+				assert(N % B == 0);
 				const int p0 = (B/2) - (N/2);
 				const int p1 = p0 + N;
 				for(int iy=p0;iy<p1;iy++) {
@@ -97,8 +98,8 @@ namespace ML::models::autoencoder_subimage {
 				return read_coords{ tx, ty, 0, iofs };
 			}
 			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) {
-				const int tx = (ox / B) * A;
-				const int ty = (oy / B) * A;
+				const int tx = (ox / B) * B;
+				const int ty = (oy / B) * B;
 				const int iofs = idim.get_offset(tx, ty, oc);
 				return read_coords{ tx, ty, oc, iofs };
 			}
@@ -127,15 +128,17 @@ namespace ML::models::autoencoder_subimage {
 		value_image<float> biases_error;// accumulated error in biases during minibatch.
 		vector<float> weights;
 		vector<float> weights_error;
+		layer_pattern pattern;
 		read_pattern kernel;
 		image_bounds bounds_i;			// corrosponding soft boundary area of input image.
 		image_bounds bounds_o;			// corrosponding soft boundary area of output image.
 		input_error_map error_map;		// extra input-error that couldnt be safely written to input-error-image.
 
 		subimage() = default;
-		subimage(const int X, const int Y, const int C, const int D, const layer_pattern pattern, const simd_image_8f_dimensions idim, const image_bounds bounds_i, const image_bounds bounds_o) :
-			biases(X,Y,C),
-			biases_error(X,Y,C),
+		subimage(const layer_pattern pattern, const simd_image_8f_dimensions idim, const value_image_dimensions subodim, const image_bounds bounds_i, const image_bounds bounds_o) :
+			biases(subodim),
+			biases_error(subodim),
+			pattern(pattern),
 			kernel(pattern, idim),
 			bounds_i(bounds_i),
 			bounds_o(bounds_o)
@@ -150,14 +153,13 @@ namespace ML::models::autoencoder_subimage {
 			std::mt19937 gen32 = utils::random::get_generator_32(seed);
 			std::normal_distribution distr_bias = utils::random::rand_normal<float>(bias_mean, bias_stddev);
 			std::normal_distribution distr_weight = utils::random::rand_normal<float>(weight_mean, weight_stddev);
+			const int n_weights_per_output_neuron = kernel.list.size();
 			const float mult = sqrtf(1.0f / n_weights_per_output_neuron);
 			for(int n=0;n<biases.data.size();n++) biases.data[n] = distr_bias(gen32);
 			for(int x=0;x<weights.size();x++) weights[x] = distr_weight(gen32) * mult;
 		}
 
-		// TODO - if this doesnt work, write a non-SIMD reference implementation and test that first.
 		void foreward_propagate(
-			const layer_pattern pattern,
 			const simd_image_8f& value_i,
 			simd_image_8f& value_o,
 			simd_image_8f& signal_o
@@ -186,7 +188,6 @@ namespace ML::models::autoencoder_subimage {
 		}
 
 		void backward_propagate(
-			const layer_pattern pattern,
 			simd_image_8f& error_i,
 			const simd_image_8f& error_o,
 			const simd_image_8f& value_i,
@@ -195,8 +196,6 @@ namespace ML::models::autoencoder_subimage {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = kernel.list.size();
-			//const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
-			const vec8f mult = simd_value(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
 
 			// clear related area of input image.
 			const vec8f zero = simd_value(0);
@@ -208,11 +207,13 @@ namespace ML::models::autoencoder_subimage {
 			error_map.clear();
 
 			// backprop.
+			//const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
+			const vec8f mult = simd_value(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
 			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
 			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
 			for(int oc=0;oc<odim.C;oc++) {
 				const int out_n = biases.dim.get_offset(ox, oy, oc);
-				if(simd_eq(error_o.data[out_n], simd_value(0.0f))) continue;// OPTIMIZATION: skip if no error.
+				//if(simd_eq(error_o.data[out_n], simd_value(0.0f))) continue;// OPTIMIZATION: skip if no error.
 				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const vec8f signal_error_term_i = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
 				const vec8f signal_error_term_w = _mm256_mul_ps(signal_error_term_i, mult);

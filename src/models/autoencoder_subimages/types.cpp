@@ -44,16 +44,15 @@ namespace ML::models::autoencoder_subimage {
 		static layer_pattern dense() {
 			return layer_pattern{ LAYER_TYPE::DENSE, 0, 0, 0 };
 		}
-		static layer_pattern spatial_mix(const int N, const int B) {
-			return layer_pattern{ LAYER_TYPE::SPATIAL_MIX, 0, B, N };
-		}
 		static layer_pattern encode(const int A, const int B) {
-			return layer_pattern{ LAYER_TYPE::ENCODE, A, B, 0 };
+			return layer_pattern{ LAYER_TYPE::ENCODE, A, B, A };
 		}
 		static layer_pattern encode_mix(const int A, const int B, const int N) {
 			return layer_pattern{ LAYER_TYPE::ENCODE_MIX, A, B, N };
 		}
-
+		static layer_pattern spatial_mix(const int N, const int B) {
+			return layer_pattern{ LAYER_TYPE::SPATIAL_MIX, B, B, N };
+		}
 	};
 
 	struct input_neuron_offset_struct {
@@ -79,7 +78,6 @@ namespace ML::models::autoencoder_subimage {
 		if(mag < 2.00f) return value * 0.3f + (sign * 0.375f);	// [1.00, 2.00] 0.675 -> 0.975
 		return value * 0.1f + (sign * 0.775f);					// [2.00,  inf] 0.975 -> inf.
 	}
-
 	float activation_derivative(const float value) {
 		const float mag = std::abs(value);
 		if(mag < 0.25f) return 1.0f;
@@ -104,7 +102,15 @@ namespace ML::models::autoencoder_subimage {
 		const vec8f product = _mm256_fmadd_ps(mag,  mult, ofs);
 		return simd_gte_cmov(signal, _mm256_set1_ps(0.0f), product, simd_negative(product));
 	}
-	vec8f simd_activation_derivative(vec8f signal) {}//TODO
+	vec8f simd_activation_derivative(vec8f signal) {
+		const vec8f mag = simd_abs(signal);
+		vec8f mult = _mm256_set1_ps(1.0f);
+		mult = simd_gte_cmov(mag, 0.25f, 0.7f, mult);
+		mult = simd_gte_cmov(mag, 0.50f, 0.5f, mult);
+		mult = simd_gte_cmov(mag, 1.00f, 0.3f, mult);
+		mult = simd_gte_cmov(mag, 2.00f, 0.1f, mult);
+		return mult;
+	}
 	//*/
 
 	/*
