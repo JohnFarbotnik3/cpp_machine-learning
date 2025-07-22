@@ -11,8 +11,8 @@ namespace ML::models::autoencoder_subimage {
 		int subimage_grid_X;// number of subimages along X-axis.
 		int subimage_grid_Y;// number of subimages along Y-axis.
 		layer_pattern pattern;
-		simd_image_8f value_o;
 		simd_image_8f signal_o;
+		simd_image_8f value_o;
 		simd_image_8f error_o;
 
 		ae_layer(
@@ -21,7 +21,11 @@ namespace ML::models::autoencoder_subimage {
 			const int grid_X,
 			const int grid_Y,
 			const layer_pattern pattern
-		) {
+		) :
+			signal_o(odim),
+			value_o(odim),
+			error_o(odim)
+		{
 			this->pattern = pattern;
 			this->subimage_grid_X = grid_X;
 			this->subimage_grid_Y = grid_Y;
@@ -90,13 +94,14 @@ namespace ML::models::autoencoder_subimage {
 			for(int x=0;x<subimages.size();x++) subimages[x].commit_extra_error(error_i);
 
 			// normalize input-error against output-error to have same average gradient per-neuron.
-			const float  in_sum = simd_reduce_mt(error_i.data.data(), error_i.data.size(), n_threads);
-			const float out_sum = simd_reduce_mt(error_o.data.data(), error_o.data.size(), n_threads);
+			const float  in_sum = simd_reduce_abs_mt(error_i.data.data(), error_i.data.size(), n_threads);
+			const float out_sum = simd_reduce_abs_mt(error_o.data.data(), error_o.data.size(), n_threads);
 			float mult = (out_sum / in_sum) * (float(error_i.data.size()) / float(error_o.data.size()));
 			//printf("error: isum=%f, osum=%f\n", in_sum, out_sum);
 			assert(out_sum > 0.0f);
 			assert( in_sum > 0.0f);
 			simd_scale_mt(error_i.data.data(), error_i.data.size(), n_threads, mult);
+			printf("in_sum=%f, out_sum=%f\n", in_sum, out_sum);
 		}
 
 		static void apply_batch_error_biases_func(ae_layer& layer, const int beg, const int end, const float adjustment_rate) {

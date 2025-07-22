@@ -97,6 +97,9 @@ namespace ML::models::autoencoder_subimage {
 			// middle layers.
 			for(int L=1;L<n_layers;L++) layers[L].propagate(n_threads, layers[L-1].value_o);
 			// last layer.
+			printf("n_layers: %i\n", n_layers);
+			printf("value_i.data.data(): %lu, %lu\n", (size_t)value_i.data.data(), value_i.data.size());
+			printf("value_o.data.data(): %lu, %lu\n", (size_t)layers.back().value_o.data.data(), layers.back().value_o.data.size());
 			memcpy(value_o.data.data(), layers.back().value_o.data.data(), value_o.data.size()*sizeof(value_o.data[0]));
 		}
 

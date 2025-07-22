@@ -1,5 +1,5 @@
 
-#include "src/image/value_image_lines.cpp"
+#include "src/image/value_image.cpp"
 #include "types.cpp"
 #include <cassert>
 #include <map>
@@ -147,6 +147,7 @@ namespace ML::models::autoencoder_subimage {
 			const int n_weights = n_weights_per_output_neuron * biases.dim.length();
 			weights.resize(n_weights, 0.0f);
 			weights_error.resize(n_weights, 0.0f);
+			//printf("nw=%i, wpn=%i\n", n_weights, n_weights_per_output_neuron);
 		}
 
 		void init_model_parameters(int seed, float bias_mean, float bias_stddev, float weight_mean, float weight_stddev) {
@@ -170,9 +171,9 @@ namespace ML::models::autoencoder_subimage {
 			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
 			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
 			for(int oc=0;oc<odim.C;oc++) {
-				const int out_n = biases.dim.get_offset(ox, oy, oc);
-				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
-				const float bias = biases.data[out_n];
+				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
+				const int wofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
+				const float bias = biases.data[bias_n];
 				vec8f sum = simd_value(bias);
 				const read_coords coords_offset = kernel.get_offset(pattern, idim, ox, oy, oc);
 				for(int w=0;w<WEIGHTS_PER_OUTPUT_NEURON;w++) {
@@ -182,6 +183,7 @@ namespace ML::models::autoencoder_subimage {
 					const int in_n = coords.iofs + coords_offset.iofs;
 					sum = _mm256_fmadd_ps(value_i.data[in_n], _mm256_set1_ps(weight), sum);
 				}
+				const int out_n = value_o.dim.get_offset(ox, oy, oc);
 				signal_o.data[out_n] = sum;
 				value_o.data[out_n] = simd_activation_func(sum);
 			}}}
@@ -212,9 +214,10 @@ namespace ML::models::autoencoder_subimage {
 			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
 			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
 			for(int oc=0;oc<odim.C;oc++) {
-				const int out_n = biases.dim.get_offset(ox, oy, oc);
+				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
 				//if(simd_eq(error_o.data[out_n], simd_value(0.0f))) continue;// OPTIMIZATION: skip if no error.
-				const int wofs = out_n * WEIGHTS_PER_OUTPUT_NEURON;
+				const int wofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
+				const int out_n = error_o.dim.get_offset(ox, oy, oc);
 				const vec8f signal_error_term_i = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
 				const vec8f signal_error_term_w = _mm256_mul_ps(signal_error_term_i, mult);
 				const read_coords coords_offset = kernel.get_offset(pattern, idim, ox, oy, oc);

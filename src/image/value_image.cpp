@@ -260,7 +260,7 @@ namespace ML::image::value_image {
 			for(int sc=0;sc<sample.dim.C;sc++) {
 				const int iofs = image.get_offset(sx-bounds.x0, sy-bounds.y0, sc);
 				const int sofs = sample.dim.get_offset(sx, sy, sc);
-				image.data[iofs] = (std::clamp(sample.data[sofs], 0.0f, 1.0f) - range.min) * mult;
+				image.data[iofs] = std::clamp((sample.data[sofs] - range.min) * mult, 0.0f, 255.0f);
 			}}}
 			return image;
 		} else {
@@ -274,7 +274,7 @@ namespace ML::image::value_image {
 			for(int sc=0;sc<image.C;sc++) {
 				const int iofs = image.get_offset(sx, sy, sc);
 				const int sofs = sample.dim.get_offset(sx, sy, sc);
-				image.data[iofs] = (std::clamp(sample.data[sofs], 0.0f, 1.0f) - range.min) * mult;
+				image.data[iofs] = std::clamp((sample.data[sofs] - range.min) * mult, 0.0f, 255.0f);
 			}}}
 			return image;
 		}

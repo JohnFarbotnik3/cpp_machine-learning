@@ -9,7 +9,19 @@
 
 namespace ML::models::autoencoder_subimage {
 
-	using vec8f = __m256;
+	// https://stackoverflow.com/questions/79539019/how-to-fix-a-warning-ignoring-attributes-with-a-vector-of-m256
+	//using vec8f = __m256;
+	struct vec8f {
+		__m256 data;
+		vec8f(__m256 x) : data(x) {}
+		operator __m256() const { return data; }
+	};
+	struct vec8i {
+		__m256i data;
+		vec8i(__m256i x) : data(x) {}
+		operator __m256i() const { return data; }
+	};
+
 	const int vec8f_LENGTH = 8;
 
 
@@ -30,6 +42,7 @@ namespace ML::models::autoencoder_subimage {
 		return _mm256_sub_ps(_mm256_setzero_ps(), a);
 	}
 	vec8f simd_sign(vec8f a) {
+		//return _mm256_sign_epi32(a)// TODO - test this.
 		return simd_gte_cmov(a, _mm256_setzero_ps(), _mm256_set1_ps(1.0f), _mm256_set1_ps(-1.0f));
 	}
 	vec8f simd_abs(vec8f a) {
@@ -61,16 +74,21 @@ namespace ML::models::autoencoder_subimage {
 		for(int x=0;x<len;x++) sum = _mm256_add_ps(sum, data[x]);
 		return simd_reduce(sum);
 	}
-	void simd_reduce_mt_func(const vec8f* data, const size_t len, float& result) {
-		result = simd_reduce(data, len);
+	float simd_reduce_abs(const vec8f* data, const size_t len) {
+		vec8f sum = simd_value(0);
+		for(int x=0;x<len;x++) sum = _mm256_add_ps(sum, simd_abs(data[x]));
+		return simd_reduce(sum);
 	}
-	float simd_reduce_mt(const vec8f* data, const size_t len, const int n_threads) {
+	void simd_reduce_abs_mt_func(const vec8f* data, const size_t len, float& result) {
+		result = simd_reduce_abs(data, len);
+	}
+	float simd_reduce_abs_mt(const vec8f* data, const size_t len, const int n_threads) {
 		float results[n_threads];
 		std::thread threads[n_threads];
 		for(int x=0;x<n_threads;x++) {
 			const int b = ((x+0) * len) / n_threads;
 			const int e = ((x+1) * len) / n_threads;
-			threads[x] = std::thread(simd_reduce_mt_func, data+b, e-b, std::ref(results[x]));
+			threads[x] = std::thread(simd_reduce_abs_mt_func, data+b, e-b, std::ref(results[x]));
 		}
 		for(int x=0;x<n_threads;x++) threads[x].join();
 		float sum = 0;

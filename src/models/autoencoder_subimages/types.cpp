@@ -3,7 +3,7 @@
 #define F_ae_subimage_types
 
 #include <vector>
-#include "src/image/value_image_lines.cpp"
+#include "src/image/value_image.cpp"
 #include "simd.cpp"
 
 namespace ML::models::autoencoder_subimage {
