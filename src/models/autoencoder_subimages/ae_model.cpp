@@ -67,10 +67,14 @@ namespace ML::models::autoencoder_subimage {
 
 			// encoder: mix and condense image.
 			odim = push_layer_encode	(idim, 8,8,	8,2,	16); idim = odim;
+			push_layer_spatial_mix		(idim, 4,4, 10,2);
 			odim = push_layer_encode	(idim, 4,4,	8,2,	48); idim = odim;
+			push_layer_spatial_mix		(idim, 2,2, 6,2);
 
 			// decoder: expand image back to original size.
+			push_layer_spatial_mix		(idim, 2,2, 6,2);
 			odim = push_layer_encode	(idim, 4,4,	2,8,	16); idim = odim;
+			push_layer_spatial_mix		(idim, 4,4, 10,2);
 			odim = push_layer_encode	(idim, 8,8,	2,8,	ch); idim = odim;
 
 			//push_layer_spatial_mix(idim, 8,8,	1,1); idim = odim;// TODO TEST

@@ -51,6 +51,9 @@ namespace ML::models::autoencoder_subimage {
 	void simd_incr(vec8f& a, const vec8f b) {
 		a = _mm256_add_ps(a, b);
 	}
+	vec8f simd_clamp(vec8f a, vec8f min, vec8f max) {
+		return _mm256_min_ps(_mm256_max_ps(a, min), max);
+	}
 
 
 	bool simd_eq(vec8f a, vec8f b) {

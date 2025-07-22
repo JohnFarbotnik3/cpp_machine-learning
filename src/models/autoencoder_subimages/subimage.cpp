@@ -185,14 +185,8 @@ namespace ML::models::autoencoder_subimage {
 				}
 				const int out_n = value_o.dim.get_offset(ox, oy, oc);
 				signal_o.data[out_n] = sum;
+				value_o.data[out_n] = simd_activation_func(sum);
 			}}}
-			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
-				const int i0 = value_o.dim.get_offset(bounds_o.x0, oy, 0);
-				const int i1 = value_o.dim.get_offset(bounds_o.x1, oy, 0);
-				for(int out_n=i0;out_n<i1;out_n++) {
-					value_o.data[out_n] = simd_activation_func(signal_o.data[out_n]);
-				}
-			}
 		}
 
 		void backward_propagate(
@@ -226,14 +220,14 @@ namespace ML::models::autoencoder_subimage {
 				const int out_n = error_o.dim.get_offset(ox, oy, oc);
 				const vec8f signal_error_term_i = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
 				const vec8f signal_error_term_w = _mm256_mul_ps(signal_error_term_i, mult);
+				biases_error.data[bias_n] += simd_reduce(signal_error_term_i);
 				const read_coords coords_offset = kernel.get_offset(pattern, idim, ox, oy, oc);
 				for(int w=0;w<WEIGHTS_PER_OUTPUT_NEURON;w++) {
 					const read_coords coords = kernel.list[w];
 					if(!kernel.is_in_read_bounds(coords, coords_offset, idim)) continue;
-					const float weight = weights[wofs + w];
 					const int in_n = coords.iofs + coords_offset.iofs;
 					vec8f weight_error = _mm256_mul_ps(signal_error_term_w, value_i.data[in_n]);
-					vec8f input_error  = _mm256_mul_ps(signal_error_term_i, simd_value(weight));
+					vec8f input_error  = _mm256_mul_ps(signal_error_term_i, simd_value(weights[wofs + w]));
 					weights_error[wofs + w] += simd_reduce(weight_error);
 					if(kernel.is_in_write_bounds(coords, coords_offset, bounds_i)) {
 						simd_incr(error_i.data[in_n], input_error);
@@ -258,15 +252,19 @@ namespace ML::models::autoencoder_subimage {
 		}
 		void apply_batch_error_weights(const float adjustment_rate) {
 			const float WEIGHT_LIMIT = 100.0f;
-			const float WEIGHT_ADJUSTMENT_LIMIT = 0.5f;
+			const float WEIGHT_ADJUSTMENT_LIMIT = 1.0f;
 			for(int x=0;x<weights.size();x++) {
 				const float adjustment = std::clamp(weights_error[x] * adjustment_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
 				weights[x] = std::clamp(weights[x] + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
 			}
 		}
 
-		void clear_batch_error_biases() { biases_error.data.assign(biases_error.data.size(), 0.0f); }
-		void clear_batch_error_weights() { weights_error.assign(weights_error.size(), 0.0f); }
+		void clear_batch_error_biases() {
+			biases_error.data.assign(biases_error.data.size(), 0.0f);
+		}
+		void clear_batch_error_weights() {
+			weights_error.assign(weights_error.size(), 0.0f);
+		}
 	};
 }
 

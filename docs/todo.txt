@@ -217,7 +217,6 @@ and some things will be made simpler by having a *fixed* number of targets for e
 
 
 > debug autoencoder.
-- remove sample-image bounds from image types, and make into a seperate struct.
 - add config file parsing (newline delimited KEY=VALUE pairs).
 * work on model ergonomics first:
 	- config files: commandline parameters in text file.
@@ -228,38 +227,14 @@ and some things will be made simpler by having a *fixed* number of targets for e
 		every message should have format: { timestamp, log_level, text }.
 		(will involve lots of snprintf, or writing variadic functions of my own.
 		if writing my own, try javascript style names like "console.log(...)".)
-** add simple annealing, and an interval over which to compare training
-	of model variants with different annealing seeds & strengths (ex. LR*0, LR*0.5, LR*1.0, LR*2.0).
-** try smaller bias distribution (reduced stdev),
-	and add commandline arguments for model-parameter distributions.
-** generate sample images and output to specified temp directory, then use those for training instead
-of using caching.
-- experiment with different colour-channel formats, example RGB, HSL, etc...
+- add commandline arguments for model-parameter distributions.
+* experiment with different colour-channel formats, example RGB, HSL, etc...
 ...
 
 
 > subimage autoencoder
-* experiment with not populating the padded area of subimages (as if unpadded images were used);
-this will prevent mixing across subimage boundaries but would simplfy code.
-* separate sample bounds from sample-image.
-* allow providing value ranges to sample images so they can be generated with the appropriate values upfront.
-*** interleaved history/batched images: combine <D> images into single interleaved image;
-history images can be similarly interleaved. this will reduce impact of scatter-style backprop,
-and has *significant* SIMD potential since same bias/weight can be used across <D> operations.
-^ pixel data order: Y, X, C, D.
-^ the content of "patterns.cpp" would then be reasonable to hardcode into foreward-prop and back-prop;
-allowing removal of read-offset-kernel and kernel-offsets-image.
-(first examine performance impact of inlining it WITHOUT the interleaved-images and SIMD).
-^ this will require packing and unpacking data to/from base image types.
-^ in theory, batch-error may not be needed if batch size is equal to interleaved image count,
-as batch-error can be applied to weights and biases in-place.
-^ input-value-image and output-error-image can be passed directly to subimages for f/b-propagation,
-removing a copying step. without padded images, bounds checking will be needed again, but thats okay now.
-input-images will now need to be preserved by layers though.
-** write SIMD version of activation function as well.
-^ read SIMD optimization guide, as there may be many very suboptimal things I am doing that I dont even know about.
-^ create simd_buffer class for storing data, and for using as a target for SIMD operations.
-^ align memory of image types to "alignment_of(vecXf)", then use load() operations instead of loadu().
+** read SIMD optimization guide, as there may be many very suboptimal things I am doing that I dont even know about.
+* pass training stats to model functions to allow for more granularity of timing measurements.
 
 
 > add to journal:
