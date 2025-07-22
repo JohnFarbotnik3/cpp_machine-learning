@@ -91,7 +91,6 @@ namespace ML::models::autoencoder_subimage {
 				threads.push_back(std::thread(back_propagate_func, std::ref(*this), beg, end, std::ref(error_i), std::ref(value_i)));
 			}
 			for(int z=0;z<n_threads;z++) threads[z].join();
-			for(int x=0;x<subimages.size();x++) subimages[x].commit_extra_error(error_i);
 
 			// normalize input-error against output-error to have same average gradient per-neuron.
 			const float  in_sum = simd_reduce_abs_mt(error_i.data.data(), error_i.data.size(), n_threads);

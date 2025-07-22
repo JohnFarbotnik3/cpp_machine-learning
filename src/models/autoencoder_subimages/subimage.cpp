@@ -12,32 +12,6 @@ namespace ML::models::autoencoder_subimage {
 	using ML::image::value_image::value_image_dimensions;
 	using ML::image::value_image::value_image;
 
-	/*
-		a map for storing extra error values that cannot be safely written to input-error image
-		due to intersecting write-area of another thread.
-	*/
-	struct input_error_map {
-		std::map<int, int> pixel_offsets;// Map<image_ofs, data_ofs>.
-		vector<vec8f> data;
-
-		void clear() {
-			data.assign(data.size(), simd_value(0.0f));
-		}
-		void apply(simd_image_8f& error_i) {
-			for(const auto& [iofs, dofs] : pixel_offsets) {
-				simd_incr(error_i.data[iofs], data[dofs]);
-			}
-		}
-
-		int get_offset(const int iofs) {
-			if(!pixel_offsets.contains(iofs)) {
-				pixel_offsets[iofs] = data.size();
-				data.push_back(simd_value(0.0f));
-			}
-			return pixel_offsets[iofs];
-		}
-	};
-
 	struct image_bounds {
 		int x0,x1;
 		int y0,y1;
@@ -132,7 +106,6 @@ namespace ML::models::autoencoder_subimage {
 		read_pattern kernel;
 		image_bounds bounds_i;			// corrosponding soft boundary area of input image.
 		image_bounds bounds_o;			// corrosponding soft boundary area of output image.
-		input_error_map error_map;		// extra input-error that couldnt be safely written to input-error-image.
 
 		subimage() = default;
 		subimage(const layer_pattern pattern, const simd_image_8f_dimensions idim, const value_image_dimensions subodim, const image_bounds bounds_i, const image_bounds bounds_o) :
@@ -206,7 +179,6 @@ namespace ML::models::autoencoder_subimage {
 			for(int ic=0;ic<idim.C;ic++) {
 				error_i.data[error_i.dim.get_offset(ix, iy, ic)] = zero;
 			}}}
-			error_map.clear();
 
 			// backprop.
 			const vec8f mult = simd_value(1.0f);
@@ -230,17 +202,9 @@ namespace ML::models::autoencoder_subimage {
 					vec8f weight_error = _mm256_mul_ps(signal_error_term_w, value_i.data[in_n]);
 					vec8f input_error  = _mm256_mul_ps(signal_error_term_i, simd_value(weights[wofs + w]));
 					weights_error[wofs + w] += simd_reduce(weight_error);
-					if(kernel.is_in_write_bounds(coords, coords_offset, bounds_i)) {
-						simd_incr(error_i.data[in_n], input_error);
-					} else {
-						simd_incr(error_map.data[error_map.get_offset(in_n)], input_error);
-					}
+					if(kernel.is_in_write_bounds(coords, coords_offset, bounds_i)) simd_incr(error_i.data[in_n], input_error);
 				}
 			}}}
-		}
-
-		void commit_extra_error(simd_image_8f& error_i) {
-			error_map.apply(error_i);
 		}
 
 		void apply_batch_error_biases(const float adjustment_rate) {
