@@ -185,8 +185,14 @@ namespace ML::models::autoencoder_subimage {
 				}
 				const int out_n = value_o.dim.get_offset(ox, oy, oc);
 				signal_o.data[out_n] = sum;
-				value_o.data[out_n] = simd_activation_func(sum);
 			}}}
+			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
+				const int i0 = value_o.dim.get_offset(bounds_o.x0, oy, 0);
+				const int i1 = value_o.dim.get_offset(bounds_o.x1, oy, 0);
+				for(int out_n=i0;out_n<i1;out_n++) {
+					value_o.data[out_n] = simd_activation_func(signal_o.data[out_n]);
+				}
+			}
 		}
 
 		void backward_propagate(

@@ -100,6 +100,11 @@ namespace ML::image::value_image {
 		}}}
 	}
 
+	/* TODO
+		- write an optimized version which scales up/down by factors of 2, then applies last scaling operation.
+		- each pixel will be assumed to read from exactly 4 pixels, but may have 0 area in some of them.
+		- split into 2 seperate functions, based on whether or not sample should be large or smaller than image.
+	*/
 	void sample_area_linear(value_image<float>& sample, const file_image& image, const sample_bounds bounds) {
 		sample.clear();
 
@@ -164,15 +169,16 @@ namespace ML::image::value_image {
 				// compute area of intersection between scaled image-pixel and sample-pixel,
 				// normalized such that sample-pixel area=1.
 				const float area = intersect_lengths_x[x] * intersect_lengths_y[y];
-				for(int sc=0;sc<sample.dim.C;sc++) value_sums[sc] += image.data[image.get_offset(ix, iy, sc)] * area;
+				const int iofs = image.get_offset(ix, iy, 0);
+				for(int sc=0;sc<sample.dim.C;sc++) value_sums[sc] += image.data[iofs+sc] * area;
 			}}
+			const int sofs = sample.dim.get_offset(sx, sy, 0);
 			for(int sc=0;sc<sample.dim.C;sc++) {
 				if(value_sums[sc] <   0.00f) printf("value_sum <   0.0f: x=%i, y=%i, c=%i, v=%f\n", bx, by, sc, value_sums[sc]);
 				if(value_sums[sc] > 255.01f) printf("value_sum < 255.0f: x=%i, y=%i, c=%i, v=%f\n", bx, by, sc, value_sums[sc]);
 				assert(value_sums[sc] >=   0.00f);
 				assert(value_sums[sc] <= 255.01f);
-				const int sofs = sample.dim.get_offset(sx, sy, sc);
-				sample.data[sofs] = value_sums[sc];
+				sample.data[sofs+sc] = value_sums[sc];
 			}
 		}}
 	}
@@ -232,11 +238,12 @@ namespace ML::image::value_image {
 
 		// scale image to given range.
 		const float mult = (range.max - range.min) / 255.0f;
+		const float ofs = range.min;
 		for(int y=bounds.y0;y<bounds.y1;y++) {
-		for(int x=bounds.x0;x<bounds.x1;x++) { const int sofs = sample.dim.get_offset(x, y, 0);
-		for(int c=0;c<sample.dim.C;c++) {
-			sample.data[sofs+c] = sample.data[sofs+c] * mult + range.min;
-		}}}
+			const int s0 = sample.dim.get_offset(bounds.x0, y, 0);
+			const int s1 = sample.dim.get_offset(bounds.x1, y, 0);
+			for(int i=s0;i<s1;i++) sample.data[i] = sample.data[i] * mult + ofs;
+		}
 
 		return bounds;
 	};

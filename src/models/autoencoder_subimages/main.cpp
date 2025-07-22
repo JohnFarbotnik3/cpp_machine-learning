@@ -92,6 +92,22 @@ struct cache_file_image {
 };
 cache_file_image file_image_cache;
 
+// NOTE: this is a temporary measure for using until I write an optimized version of my linear sampling function.
+struct sample_pair { sample_image_t image; sample_bounds bounds; };
+struct cache_sample_image {
+	std::map<string, sample_pair> cache;
+
+	sample_pair& get(string path, const file_image_t& file_image, const int X, const int Y, const int C, const sample_range range) {
+		if(!cache.contains(path)) {
+			sample_image_t sample_image(X, Y, C);
+			sample_bounds bounds = ML::image::value_image::generate_sample_image(sample_image, file_image, range);
+			cache[path] = sample_pair{ sample_image, bounds };
+		}
+		return cache.at(path);
+	}
+};
+cache_sample_image sample_image_cache;
+
 
 struct training_settings {
 	ML::stats::training_stats stats;
@@ -123,10 +139,10 @@ float generate_error_image(simd_image_8f& error_o, const simd_image_8f& value_i,
 
 	// load bounds into SIMD registers.
 	// TODO - try studying the SIMD interface again to see if there is a consistent way to do int32 GE comparison.
-	__m256 x0 = _mm256_set1_ps(0);
-	__m256 x1 = _mm256_set1_ps(0);
-	__m256 y0 = _mm256_set1_ps(0);
-	__m256 y1 = _mm256_set1_ps(0);
+	__m256 x0 = _mm256_setzero_ps();
+	__m256 x1 = _mm256_setzero_ps();
+	__m256 y0 = _mm256_setzero_ps();
+	__m256 y1 = _mm256_setzero_ps();
 	for(int n=0;n<N;n++) {
 		x0[n] = bounds[n].x0;
 		x1[n] = bounds[n].x1;
@@ -153,7 +169,7 @@ float generate_error_image(simd_image_8f& error_o, const simd_image_8f& value_i,
 		// error = in_bounds ? (input - output) : 0
 		error_o.data[iofs] = _mm256_blendv_ps(zero, diff, mask);
 		sum = _mm256_add_ps(sum, simd_abs(error_o.data[iofs]));
-		// TODO - clamp error?
+		// NOTE - clamp error?
 	}}}
 
 	return simd_reduce(sum);
@@ -179,8 +195,8 @@ void training_cycle(model_t& model, training_settings& settings) {
 	// get samples.
 	const int n_images = settings.minibatch_size;
 	assert(5 <= n_images && n_images <= 8);// TODO - rework function to loop for larger minibatch sizes.
-	vector<sample_image_t> sample_images;
-	vector<sample_bounds> arr_sample_bounds;
+	vector<sample_image_t> samples_images;
+	vector<sample_bounds> samples_bounds;
 	for(int x=0;x<n_images;x++) {
 		// load image.
 		t0 = timepoint::now();
@@ -191,10 +207,9 @@ void training_cycle(model_t& model, training_settings& settings) {
 
 		// generate sample.
 		t0 = timepoint::now();
-		sample_image_t sample_image(dim.X, dim.Y, dim.C);
-		sample_bounds bounds = ML::image::value_image::generate_sample_image(sample_image, file_image, settings.range);
-		sample_images.push_back(sample_image);
-		arr_sample_bounds.push_back(bounds);
+		const sample_pair& pair = sample_image_cache.get(path, file_image, dim.X, dim.Y, dim.C, settings.range);
+		samples_images.push_back(pair.image);
+		samples_bounds.push_back(pair.bounds);
 		t1 = timepoint::now();
 		settings.stats.push_value("dt gen sample", t1.delta_us(t0));
 	}
@@ -205,7 +220,7 @@ void training_cycle(model_t& model, training_settings& settings) {
 	simd_image_t value_o(dim);
 	simd_image_t error_o(dim);
 	simd_image_t error_i(dim);
-	value_i.pack(sample_images.data(), sample_images.size());
+	value_i.pack(samples_images.data(), samples_images.size());
 	t1 = timepoint::now();
 	settings.stats.push_value("dt sample pack", t1.delta_us(t0));
 
@@ -217,11 +232,11 @@ void training_cycle(model_t& model, training_settings& settings) {
 
 	// compute error.
 	t0 = timepoint::now();
-	const float total_error = generate_error_image(error_o, value_i, value_o, arr_sample_bounds.data(), n_images);
+	const float total_error = generate_error_image(error_o, value_i, value_o, samples_bounds.data(), n_images);
 	int total_length = 0;
 	for(int x=0;x<n_images;x++) {
-		sample_bounds bounds = arr_sample_bounds[x];
-		total_length += (bounds.x1 - bounds.x0) * (bounds.y1 - bounds.y0) * sample_images[x].dim.C;
+		sample_bounds bounds = samples_bounds[x];
+		total_length += (bounds.x1 - bounds.x0) * (bounds.y1 - bounds.y0) * samples_images[x].dim.C;
 	}
 	const float avg_error = total_error / total_length;
 	batch_avg_error += avg_error;

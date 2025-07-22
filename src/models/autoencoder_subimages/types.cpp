@@ -94,13 +94,13 @@ namespace ML::models::autoencoder_subimage {
 		mult = simd_gte_cmov(mag, 0.50f, 0.5f, mult);
 		mult = simd_gte_cmov(mag, 1.00f, 0.3f, mult);
 		mult = simd_gte_cmov(mag, 2.00f, 0.1f, mult);
-		vec8f ofs = _mm256_set1_ps(0.0f);
+		vec8f ofs = _mm256_setzero_ps();
 		ofs = simd_gte_cmov(mag, 0.25f, 0.075f, ofs);
 		ofs = simd_gte_cmov(mag, 0.50f, 0.175f, ofs);
 		ofs = simd_gte_cmov(mag, 1.00f, 0.375f, ofs);
 		ofs = simd_gte_cmov(mag, 2.00f, 0.775f, ofs);
 		const vec8f product = _mm256_fmadd_ps(mag,  mult, ofs);
-		return simd_gte_cmov(signal, _mm256_set1_ps(0.0f), product, simd_negative(product));
+		return simd_gte_cmov(signal, _mm256_setzero_ps(), product, simd_negative(product));
 	}
 	vec8f simd_activation_derivative(vec8f signal) {
 		const vec8f mag = simd_abs(signal);
@@ -111,6 +111,7 @@ namespace ML::models::autoencoder_subimage {
 		mult = simd_gte_cmov(mag, 2.00f, 0.1f, mult);
 		return mult;
 	}
+
 	//*/
 
 	/*
