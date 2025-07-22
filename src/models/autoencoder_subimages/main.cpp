@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include "src/utils/commandline.cpp"
 #include "src/utils/random.cpp"
 #include "src/image/file_image.cpp"
@@ -81,6 +82,17 @@ struct file_iterator {
 	}
 };
 
+struct cache_file_image {
+	std::map<string, file_image_t> cache;
+
+	file_image_t& get(string path, const int ch) {
+		if(!cache.contains(path)) cache[path] = ML::image::load_file_image(path, ch);
+		return cache.at(path);
+	}
+};
+cache_file_image file_image_cache;
+
+
 struct training_settings {
 	ML::stats::training_stats stats;
 	file_iterator file_iter;
@@ -125,24 +137,24 @@ float generate_error_image(simd_image_8f& error_o, const simd_image_8f& value_i,
 	// compute error.
 	const vec8f zero = _mm256_setzero_ps();
 	vec8f sum = _mm256_setzero_ps();
-	for(int y=0;y<dim.Y;y++) {
-	for(int x=0;x<dim.X;x++) {
+	for(int oy=0;oy<dim.Y;oy++) {
+	for(int ox=0;ox<dim.X;ox++) {
 		// get bitmask containing 1's if image[n] is in bounds, and 0's otherwise.
-		vec8f mx0 = _mm256_cmp_ps(_mm256_set1_ps(x), x0, _CMP_GE_OS);
-		vec8f mx1 = _mm256_cmp_ps(_mm256_set1_ps(x), x1, _CMP_LT_OS);
-		vec8f my0 = _mm256_cmp_ps(_mm256_set1_ps(y), y0, _CMP_GE_OS);
-		vec8f my1 = _mm256_cmp_ps(_mm256_set1_ps(y), y1, _CMP_LT_OS);
+		vec8f vox = _mm256_set1_ps(ox);
+		vec8f voy = _mm256_set1_ps(oy);
+		vec8f mx0 = _mm256_cmp_ps(vox, x0, _CMP_GE_OS);
+		vec8f mx1 = _mm256_cmp_ps(vox, x1, _CMP_LT_OS);
+		vec8f my0 = _mm256_cmp_ps(voy, y0, _CMP_GE_OS);
+		vec8f my1 = _mm256_cmp_ps(voy, y1, _CMP_LT_OS);
 		vec8f mask = _mm256_and_ps(_mm256_and_ps(mx0, mx1), _mm256_and_ps(my0, my1));
-
-		for(int c=0;c<dim.C;c++) {
-			const int iofs = dim.get_offset(x, y, c);
-			const vec8f diff = _mm256_sub_ps(value_i.data[x], value_o.data[x]);
-			// error = in_bounds ? (input - output) : 0
-			error_o.data[x] = _mm256_blendv_ps(zero, diff, mask);
-			sum = _mm256_add_ps(sum, error_o.data[x]);
-			// TODO - clamp error?
-		}
-	}}
+	for(int oc=0;oc<dim.C;oc++) {
+		const int iofs = dim.get_offset(ox, oy, oc);
+		const vec8f diff = _mm256_sub_ps(value_i.data[iofs], value_o.data[iofs]);
+		// error = in_bounds ? (input - output) : 0
+		error_o.data[iofs] = _mm256_blendv_ps(zero, diff, mask);
+		sum = _mm256_add_ps(sum, simd_abs(error_o.data[iofs]));
+		// TODO - clamp error?
+	}}}
 
 	return simd_reduce(sum);
 }
@@ -173,15 +185,15 @@ void training_cycle(model_t& model, training_settings& settings) {
 		// load image.
 		t0 = timepoint::now();
 		const string path = settings.file_iter.next();
-		file_image_t file_image = ML::image::load_file_image(path, dim.C);
+		file_image_t file_image = file_image_cache.get(path, dim.C);
 		t1 = timepoint::now();
 		settings.stats.push_value("dt load image", t1.delta_us(t0));
 
 		// generate sample.
 		t0 = timepoint::now();
-		sample_images.push_back(sample_image_t(dim.X, dim.Y, dim.C));
-		sample_image_t sample_image = sample_images.back();
+		sample_image_t sample_image(dim.X, dim.Y, dim.C);
 		sample_bounds bounds = ML::image::value_image::generate_sample_image(sample_image, file_image, settings.range);
+		sample_images.push_back(sample_image);
 		arr_sample_bounds.push_back(bounds);
 		t1 = timepoint::now();
 		settings.stats.push_value("dt gen sample", t1.delta_us(t0));
@@ -365,6 +377,13 @@ int main(const int argc, const char** argv) {
 	settings.gen32 = utils::random::get_generator_32(settings.seed);
 	vector<float>& error_trend = settings.batch_error_trend;
 	while(settings.cycle < settings.n_training_cycles) {
+		// update learning rate.
+		if(settings.cycle % tadjustlr_itv == 0 && (settings.cycle > 0 || tadjustlr_ini)) {
+			printf("updating learning rate:\n");
+			update_learning_rate(model, settings, tadjustlr_len, 'b');
+			update_learning_rate(model, settings, tadjustlr_len, 'w');
+			printf("new learning rate: lr_b=%f, lr_w=%f\n", settings.learning_rate_b, settings.learning_rate_w);
+		}
 		// run training batch.
 		training_cycle(model, settings);
 		printf("training cycle: %i/%i | error: %f\n", settings.cycle, settings.n_training_cycles, error_trend.back());
@@ -390,13 +409,6 @@ int main(const int argc, const char** argv) {
 			if(print_model_params_debug) print_model_parameters(model);
 			settings.stats.clear_all();
 			printf("------------------------------\n");
-		}
-		// update learning rate.
-		if(settings.cycle % tadjustlr_itv == 0 && (settings.cycle > 0 || tadjustlr_ini)) {
-			printf("updating learning rate:\n");
-			update_learning_rate(model, settings, tadjustlr_len, 'b');
-			update_learning_rate(model, settings, tadjustlr_len, 'w');
-			printf("new learning rate: lr_b=%f, lr_w=%f\n", settings.learning_rate_b, settings.learning_rate_w);
 		}
 	}
 	printf("done training.\n");

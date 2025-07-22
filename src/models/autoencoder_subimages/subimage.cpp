@@ -209,13 +209,13 @@ namespace ML::models::autoencoder_subimage {
 			error_map.clear();
 
 			// backprop.
-			//const float mult = sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
-			const vec8f mult = simd_value(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
+			const vec8f mult = simd_value(sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON));
+			//const vec8f mult = simd_value(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
 			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
 			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
 			for(int oc=0;oc<odim.C;oc++) {
 				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
-				//if(simd_eq(error_o.data[out_n], simd_value(0.0f))) continue;// OPTIMIZATION: skip if no error.
+				//if(simd_eq(error_o.data[bias_n], simd_value(0.0f))) continue;// OPTIMIZATION: skip if no error.
 				const int wofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const int out_n = error_o.dim.get_offset(ox, oy, oc);
 				const vec8f signal_error_term_i = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));

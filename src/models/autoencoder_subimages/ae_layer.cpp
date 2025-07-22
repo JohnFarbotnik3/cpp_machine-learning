@@ -97,11 +97,10 @@ namespace ML::models::autoencoder_subimage {
 			const float  in_sum = simd_reduce_abs_mt(error_i.data.data(), error_i.data.size(), n_threads);
 			const float out_sum = simd_reduce_abs_mt(error_o.data.data(), error_o.data.size(), n_threads);
 			float mult = (out_sum / in_sum) * (float(error_i.data.size()) / float(error_o.data.size()));
-			//printf("error: isum=%f, osum=%f\n", in_sum, out_sum);
+			printf("error: in_sum=%f, out_sum=%f\n", in_sum, out_sum);
 			assert(out_sum > 0.0f);
 			assert( in_sum > 0.0f);
 			simd_scale_mt(error_i.data.data(), error_i.data.size(), n_threads, mult);
-			printf("in_sum=%f, out_sum=%f\n", in_sum, out_sum);
 		}
 
 		static void apply_batch_error_biases_func(ae_layer& layer, const int beg, const int end, const float adjustment_rate) {

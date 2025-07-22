@@ -73,6 +73,8 @@ namespace ML::models::autoencoder_subimage {
 			odim = push_layer_encode	(idim, 4,4,	2,8,	16); idim = odim;
 			odim = push_layer_encode	(idim, 8,8,	2,8,	ch); idim = odim;
 
+			//push_layer_spatial_mix(idim, 8,8,	1,1); idim = odim;// TODO TEST
+
 			assert(odim.X == input_dimensions.X);
 			assert(odim.Y == input_dimensions.Y);
 			assert(odim.C == input_dimensions.C);
@@ -97,9 +99,6 @@ namespace ML::models::autoencoder_subimage {
 			// middle layers.
 			for(int L=1;L<n_layers;L++) layers[L].propagate(n_threads, layers[L-1].value_o);
 			// last layer.
-			printf("n_layers: %i\n", n_layers);
-			printf("value_i.data.data(): %lu, %lu\n", (size_t)value_i.data.data(), value_i.data.size());
-			printf("value_o.data.data(): %lu, %lu\n", (size_t)layers.back().value_o.data.data(), layers.back().value_o.data.size());
 			memcpy(value_o.data.data(), layers.back().value_o.data.data(), value_o.data.size()*sizeof(value_o.data[0]));
 		}
 

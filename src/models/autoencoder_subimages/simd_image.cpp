@@ -6,7 +6,6 @@
 namespace ML::models::autoencoder_subimage {
 	using std::vector;
 	using ML::image::value_image::value_image;
-	using ML::image::value_image::sample_bounds;
 
 	struct simd_image_8f_dimensions {
 		int X;// image width.
