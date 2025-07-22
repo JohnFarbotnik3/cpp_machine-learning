@@ -281,7 +281,7 @@ void update_learning_rate(model_t& model, training_settings& settings, int cycle
 		if(mode == 'w') test_settings.learning_rate_w = new_rate;
 		printf("trying rate [mode=%c] = %f\n", mode, new_rate);
 		for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings);
-		const vector<int> percentiles { 80 };
+		const vector<int> percentiles { 90 };
 		float pct_error = ML::stats::get_percentile_values(percentiles, test_settings.stats.groups.at("avg error"))[0];
 		if(pct_error < best_pct_error || z == 0) {
 			best_pct_error = pct_error;

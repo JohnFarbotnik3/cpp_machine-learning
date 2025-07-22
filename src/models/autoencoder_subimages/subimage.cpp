@@ -209,7 +209,8 @@ namespace ML::models::autoencoder_subimage {
 			error_map.clear();
 
 			// backprop.
-			const vec8f mult = simd_value(sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON));
+			const vec8f mult = simd_value(1.0f);
+			//const vec8f mult = simd_value(sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON));
 			//const vec8f mult = simd_value(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
 			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
 			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
