@@ -42,8 +42,8 @@ gdb -ex=r --args ...COMMAND...
 
 perf:
 perf stat -d -d -d -- <RUN COMMAND WITH OPTIONS>
-perf record -- COMMAND [OPTIONS...]
-perf report -i "./perf.data"
+perf record -o "/dev/shm/perf.data" -- COMMAND [OPTIONS...]
+perf report -i "/dev/shm/perf.data"
 
 */
 
