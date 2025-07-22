@@ -262,17 +262,28 @@ void training_cycle(model_t& model, training_settings& settings) {
 	settings.cycle++;
 }
 
+float rolling_average_last_n(const vector<float> values, const int N) {
+	float sum = 0.0f;
+	float weight = 0.0f;
+	for(int n=N;n>0;n--) {
+		const float mult = float(n)/N;
+		sum += values[n-1] * mult;
+		weight += mult;
+	}
+	return sum / weight;
+}
 void update_learning_rate(model_t& model, training_settings& settings, int cycles, const char mode) {
+	assert(mode == 'b' || mode == 'w');
 	const float LEARNING_RATE_LIMIT = 1.0f;
-	float best_pct_error;
+	float best_avg_error;
 	training_settings best_settings = settings;
 	model_t best_model = model;
 
 	const float rate = (mode == 'b') ? settings.learning_rate_b : settings.learning_rate_w;
 	if(rate == 0.0f) return;// ignore learning rate if 0.
 	vector<float> lr_mults = rate >= LEARNING_RATE_LIMIT
-		? vector<float>{ 0.7, 1.0 }
-		: vector<float>{ 0.7, 1.0, 1.2 };
+		? vector<float>{ 1.0, 0.7 }
+		: vector<float>{ 1.0, 0.7, 1.2 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		model_t test_model = model;
@@ -281,10 +292,10 @@ void update_learning_rate(model_t& model, training_settings& settings, int cycle
 		if(mode == 'w') test_settings.learning_rate_w = new_rate;
 		printf("trying rate [mode=%c] = %f\n", mode, new_rate);
 		for(int x=0;x<cycles;x++) training_cycle(test_model, test_settings);
-		const vector<int> percentiles { 90 };
-		float pct_error = ML::stats::get_percentile_values(percentiles, test_settings.stats.groups.at("avg error"))[0];
-		if(pct_error < best_pct_error || z == 0) {
-			best_pct_error = pct_error;
+		float avg_error = rolling_average_last_n(test_settings.stats.groups.at("avg error"), cycles);
+		fprintf(stderr, "mode=%c, LR=%f, avg_error=%0.10f\n", mode, new_rate, avg_error);
+		if(avg_error < best_avg_error || z == 0) {
+			best_avg_error = avg_error;
 			best_settings = test_settings;
 			best_model = test_model;
 		}
@@ -394,8 +405,8 @@ int main(const int argc, const char** argv) {
 		// update learning rate.
 		if(settings.cycle % tadjustlr_itv == 0 && (settings.cycle > 0 || tadjustlr_ini)) {
 			printf("updating learning rate:\n");
-			update_learning_rate(model, settings, tadjustlr_len, 'b');
 			update_learning_rate(model, settings, tadjustlr_len, 'w');
+			update_learning_rate(model, settings, tadjustlr_len, 'b');
 			printf("new learning rate: lr_b=%f, lr_w=%f\n", settings.learning_rate_b, settings.learning_rate_w);
 		}
 		// run training batch.
