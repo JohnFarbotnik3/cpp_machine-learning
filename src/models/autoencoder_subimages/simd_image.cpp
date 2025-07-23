@@ -1,4 +1,7 @@
 
+#ifndef F_simd_image
+#define F_simd_image
+
 #include <vector>
 #include "simd.cpp"
 #include "src/image/value_image.cpp"
@@ -11,19 +14,21 @@ namespace ML::models::autoencoder_subimage {
 		int X;// image width.
 		int Y;// image height.
 		int C;// number of colour channels.
+		int STRIDE_X;
+		int STRIDE_Y;
 
 		simd_image_8f_dimensions() = default;
 		simd_image_8f_dimensions(int X, int Y, int C) {
 			this->X = X;
 			this->Y = Y;
 			this->C = C;
+			this->STRIDE_X = C;
+			this->STRIDE_Y = C*X;
 		}
 
-		int get_offset(int x, int y, int c) const { return ((y*X) + x)*C + c; }
+		int get_offset(int x, int y, int c) const { return y*STRIDE_Y + x*STRIDE_X + c; }
 
 		int length() const { return Y*X*C; }
-		int row_length() const { return X*C; }
-		int pixel_length() const { return C; }
 
 		bool equals(const simd_image_8f_dimensions& other) const {
 			return (
@@ -65,3 +70,5 @@ namespace ML::models::autoencoder_subimage {
 		}
 	};
 };
+
+#endif

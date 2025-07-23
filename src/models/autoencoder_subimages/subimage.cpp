@@ -2,7 +2,6 @@
 #include "src/image/value_image.cpp"
 #include "types.cpp"
 #include <cassert>
-#include <map>
 #include "src/utils/random.cpp"
 #include "src/image/extra_image_types.cpp"
 #include "simd.cpp"
@@ -11,11 +10,6 @@
 namespace ML::models::autoencoder_subimage {
 	using ML::image::value_image::value_image_dimensions;
 	using ML::image::value_image::value_image;
-
-	struct image_bounds {
-		int x0,x1;
-		int y0,y1;
-	};
 
 	struct read_coords { int x,y,c,iofs; };
 	struct read_pattern {
@@ -133,78 +127,185 @@ namespace ML::models::autoencoder_subimage {
 			for(int x=0;x<weights.size();x++) weights[x] = distr_weight(gen32) * mult;
 		}
 
-		void foreward_propagate(
-			const simd_image_8f& value_i,
-			simd_image_8f& value_o,
-			simd_image_8f& signal_o
-		) {
+		void foreward_propagate_general(const simd_image_8f& value_i, simd_image_8f& value_o, simd_image_8f& signal_o) {
 			const simd_image_8f_dimensions idim = value_i.dim;
 			const simd_image_8f_dimensions odim = value_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = kernel.list.size();
 			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
 			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
 			for(int oc=0;oc<odim.C;oc++) {
+				const int out_n = value_o.dim.get_offset(ox, oy, oc);
 				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
-				const int wofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
+				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const float bias = biases.data[bias_n];
 				vec8f sum = simd_value(bias);
 				const read_coords coords_offset = kernel.get_offset(pattern, idim, ox, oy, oc);
 				for(int w=0;w<WEIGHTS_PER_OUTPUT_NEURON;w++) {
 					const read_coords coords = kernel.list[w];
 					if(!kernel.is_in_read_bounds(coords, coords_offset, idim)) continue;
-					const float weight = weights[wofs + w];
+					const float weight = weights[w_ofs + w];
 					const int in_n = coords.iofs + coords_offset.iofs;
 					sum = _mm256_fmadd_ps(value_i.data[in_n], _mm256_set1_ps(weight), sum);
 				}
-				const int out_n = value_o.dim.get_offset(ox, oy, oc);
 				signal_o.data[out_n] = sum;
 				value_o.data[out_n] = simd_activation_func(sum);
 			}}}
 		}
+		void foreward_propagate_dense(const simd_image_8f& value_i, simd_image_8f& value_o, simd_image_8f& signal_o) {
+			const simd_image_8f_dimensions idim = value_i.dim;
+			const simd_image_8f_dimensions odim = value_o.dim;
+			const int WEIGHTS_PER_OUTPUT_NEURON = pattern.WEIGHTS_PER_OUTPUT_NEURON;
+			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
+			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
+			for(int oc=0;oc<odim.C;oc++) {
+				const int out_n = value_o.dim.get_offset(ox, oy, oc);
+				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
+				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
+				vec8f sum = simd_value(biases.data[bias_n]);
 
-		void backward_propagate(
-			simd_image_8f& error_i,
-			const simd_image_8f& error_o,
-			const simd_image_8f& value_i,
-			const simd_image_8f& signal_o
-		) {
+				int w = w_ofs;
+				for(int y=bounds_i.y0;y<bounds_i.y1;y++) {
+				for(int x=bounds_i.x0;x<bounds_i.x1;x++) {
+				for(int c=0;c<idim.C;c++) {
+					const int in_n = idim.get_offset(x, y, c);
+					sum = _mm256_fmadd_ps(value_i.data[in_n], _mm256_set1_ps(weights[w]), sum);
+					w++;
+				}}}
+
+				signal_o.data[out_n] = sum;
+				value_o.data[out_n] = simd_activation_func(sum);
+			}}}
+		}
+		void foreward_propagate_encode(const simd_image_8f& value_i, simd_image_8f& value_o, simd_image_8f& signal_o) {
+			const simd_image_8f_dimensions idim = value_i.dim;
+			const simd_image_8f_dimensions odim = value_o.dim;
+			const int A = pattern.A;
+			const int B = pattern.B;
+			const int WEIGHTS_PER_OUTPUT_NEURON = pattern.WEIGHTS_PER_OUTPUT_NEURON;
+			const int W_STRIDE_X = idim.C;
+			const int W_STRIDE_Y = idim.C * A;
+			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) { const int iy0=(oy/B)*A;
+			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) { const int ix0=(ox/B)*A;
+			for(int oc=0;oc<odim.C;oc++) {
+				const int out_n = value_o.dim.get_offset(ox, oy, oc);
+				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
+				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
+				vec8f sum = simd_value(biases.data[bias_n]);
+
+				for(int y=0;y<A;y++) { const int iy = y + iy0;
+				for(int x=0;x<A;x++) { const int ix = x + ix0;
+				for(int c=0;c<idim.C;c++) {
+					const int in_n = idim.get_offset(ix, iy, c);
+					const int w = w_ofs + y*W_STRIDE_Y + x*W_STRIDE_X + c;
+					sum = _mm256_fmadd_ps(value_i.data[in_n], _mm256_set1_ps(weights[w]), sum);
+				}}}
+
+				signal_o.data[out_n] = sum;
+				value_o.data[out_n] = simd_activation_func(sum);
+			}}}
+		}
+		void foreward_propagate_encode_mix(const simd_image_8f& value_i, simd_image_8f& value_o, simd_image_8f& signal_o) {
+			const simd_image_8f_dimensions idim = value_i.dim;
+			const simd_image_8f_dimensions odim = value_o.dim;
+			const int A = pattern.A;
+			const int B = pattern.B;
+			const int N = pattern.N;
+			const int WEIGHTS_PER_OUTPUT_NEURON = pattern.WEIGHTS_PER_OUTPUT_NEURON;
+			const int W_STRIDE_X = idim.C;
+			const int W_STRIDE_Y = idim.C * N;
+			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) { const int iy0=(oy/B)*A + A/2 - N/2;
+			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) { const int ix0=(ox/B)*A + A/2 - N/2;
+			for(int oc=0;oc<odim.C;oc++) {
+				const int out_n = value_o.dim.get_offset(ox, oy, oc);
+				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
+				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
+				vec8f sum = simd_value(biases.data[bias_n]);
+
+				for(int y=0;y<N;y++) { const int iy = y + iy0; if(iy<0 || iy>=idim.Y) continue;
+				for(int x=0;x<N;x++) { const int ix = x + ix0; if(ix<0 || ix>=idim.X) continue;
+				for(int c=0;c<idim.C;c++) {
+					const int in_n = idim.get_offset(ix, iy, c);
+					const int w = w_ofs + y*W_STRIDE_Y + x*W_STRIDE_X + c;
+					sum = _mm256_fmadd_ps(value_i.data[in_n], _mm256_set1_ps(weights[w]), sum);
+				}}}
+
+				signal_o.data[out_n] = sum;
+				value_o.data[out_n] = simd_activation_func(sum);
+			}}}
+		}
+		void foreward_propagate_spatial_mix(const simd_image_8f& value_i, simd_image_8f& value_o, simd_image_8f& signal_o) {
+			const simd_image_8f_dimensions idim = value_i.dim;
+			const simd_image_8f_dimensions odim = value_o.dim;
+			const int B = pattern.B;
+			const int N = pattern.N;
+			const int WEIGHTS_PER_OUTPUT_NEURON = pattern.WEIGHTS_PER_OUTPUT_NEURON;
+			const int W_STRIDE_X = 1;
+			const int W_STRIDE_Y = N;
+			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) { const int iy0=(oy/B)*B + B/2 - N/2;
+			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) { const int ix0=(ox/B)*B + B/2 - N/2;
+			for(int oc=0;oc<odim.C;oc++) {
+				const int out_n = value_o.dim.get_offset(ox, oy, oc);
+				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
+				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
+				vec8f sum = simd_value(biases.data[bias_n]);
+
+				for(int y=0;y<N;y++) { const int iy = y + iy0; if(iy<0 || iy>=idim.Y) continue;
+				for(int x=0;x<N;x++) { const int ix = x + ix0; if(ix<0 || ix>=idim.X) continue;
+					const int in_n = idim.get_offset(ix, iy, oc);
+					const int w = w_ofs + y*W_STRIDE_Y + x*W_STRIDE_X;
+					sum = _mm256_fmadd_ps(value_i.data[in_n], _mm256_set1_ps(weights[w]), sum);
+				}}
+
+				signal_o.data[out_n] = sum;
+				value_o.data[out_n] = simd_activation_func(sum);
+			}}}
+		}
+		void foreward_propagate(const simd_image_8f& value_i, simd_image_8f& value_o, simd_image_8f& signal_o) {
+			//foreward_propagate_general(value_i, value_o, signal_o);
+			///*
+			if(pattern.type == LAYER_TYPE::DENSE) foreward_propagate_dense(value_i, value_o, signal_o);
+			if(pattern.type == LAYER_TYPE::ENCODE) foreward_propagate_encode(value_i, value_o, signal_o);
+			if(pattern.type == LAYER_TYPE::ENCODE_MIX) foreward_propagate_encode_mix(value_i, value_o, signal_o);
+			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) foreward_propagate_spatial_mix(value_i, value_o, signal_o);
+			//*/
+		}
+
+		void backward_propagate_general(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = kernel.list.size();
 
-			// clear related area of input image.
-			const vec8f zero = simd_value(0);
-			for(int iy=bounds_i.y0;iy<bounds_i.y1;iy++) {
-			for(int ix=bounds_i.x0;ix<bounds_i.x1;ix++) {
-			for(int ic=0;ic<idim.C;ic++) {
-				error_i.data[error_i.dim.get_offset(ix, iy, ic)] = zero;
-			}}}
-
 			// backprop.
-			const vec8f mult = simd_value(1.0f);
-			//const vec8f mult = simd_value(sqrtf(1.0f / WEIGHTS_PER_OUTPUT_NEURON));
-			//const vec8f mult = simd_value(1.0f / WEIGHTS_PER_OUTPUT_NEURON);
 			for(int oy=bounds_o.y0;oy<bounds_o.y1;oy++) {
 			for(int ox=bounds_o.x0;ox<bounds_o.x1;ox++) {
 			for(int oc=0;oc<odim.C;oc++) {
 				const int bias_n = biases.dim.get_offset(ox - bounds_o.x0, oy - bounds_o.y0, oc);
-				//if(simd_eq(error_o.data[bias_n], simd_value(0.0f))) continue;// OPTIMIZATION: skip if no error.
-				const int wofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const int out_n = error_o.dim.get_offset(ox, oy, oc);
-				const vec8f signal_error_term_i = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
-				const vec8f signal_error_term_w = _mm256_mul_ps(signal_error_term_i, mult);
-				biases_error.data[bias_n] += simd_reduce(signal_error_term_i);
+				const int wofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
+				const vec8f signal_error_term = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
+				biases_error.data[bias_n] += simd_reduce(signal_error_term);
 				const read_coords coords_offset = kernel.get_offset(pattern, idim, ox, oy, oc);
 				for(int w=0;w<WEIGHTS_PER_OUTPUT_NEURON;w++) {
 					const read_coords coords = kernel.list[w];
 					if(!kernel.is_in_read_bounds(coords, coords_offset, idim)) continue;
 					const int in_n = coords.iofs + coords_offset.iofs;
-					vec8f weight_error = _mm256_mul_ps(signal_error_term_w, value_i.data[in_n]);
-					vec8f input_error  = _mm256_mul_ps(signal_error_term_i, simd_value(weights[wofs + w]));
+					vec8f weight_error = _mm256_mul_ps(signal_error_term, value_i.data[in_n]);
+					vec8f input_error  = _mm256_mul_ps(signal_error_term, simd_value(weights[wofs + w]));
 					weights_error[wofs + w] += simd_reduce(weight_error);
 					if(kernel.is_in_write_bounds(coords, coords_offset, bounds_i)) simd_incr(error_i.data[in_n], input_error);
 				}
 			}}}
+		}
+		void backward_propagate(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o) {
+			// clear related area of input image.
+			const vec8f zero = simd_value(0);
+			for(int iy=bounds_i.y0;iy<bounds_i.y1;iy++) {
+			for(int ix=bounds_i.x0;ix<bounds_i.x1;ix++) {
+			for(int ic=0;ic<error_i.dim.C;ic++) {
+				error_i.data[error_i.dim.get_offset(ix, iy, ic)] = zero;
+			}}}
+
+			backward_propagate_general(error_i, error_o, value_i, signal_o);
 		}
 
 		void apply_batch_error_biases(const float adjustment_rate) {

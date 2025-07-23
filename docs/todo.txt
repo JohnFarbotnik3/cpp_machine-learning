@@ -236,7 +236,7 @@ and some things will be made simpler by having a *fixed* number of targets for e
 ** read SIMD optimization guide, as there may be many very suboptimal things I am doing that I dont even know about.
 * pass training stats to model functions to allow for more granularity of timing measurements.
 * implement vec16f and larger batches to observe if performance uplift continues (since right now weights still seem to be majority of memory bandwidth).
-
+- add getter for WEIGHTS_PER_NEURON to layer_pattern struct.
 
 
 > add to journal:

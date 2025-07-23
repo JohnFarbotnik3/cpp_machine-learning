@@ -101,9 +101,10 @@ namespace ML::image::value_image {
 	}
 
 	/* TODO
-		- write an optimized version which scales up/down by factors of 2, then applies last scaling operation.
-		- each pixel will be assumed to read from exactly 4 pixels, but may have 0 area in some of them.
-		- split into 2 seperate functions, based on whether or not sample should be large or smaller than image.
+		- write an optimized version which scales down by a factor of 2 in each axis.
+		^ each pixel will read from 4 pixels, having an average mix of their colour values.
+		- write another function which scales down by a factor of X in the range [1.0, 2.0].
+		^ each pixel will be assumed to read from exactly 4 pixels, but may have 0 area in some of them.
 	*/
 	void sample_area_linear(value_image<float>& sample, const file_image& image, const sample_bounds bounds) {
 		sample.clear();

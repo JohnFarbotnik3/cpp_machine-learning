@@ -2,25 +2,27 @@
 #ifndef F_ae_subimage_types
 #define F_ae_subimage_types
 
-#include <vector>
-#include "src/image/value_image.cpp"
 #include "simd.cpp"
+#include "simd_image.cpp"
 
 namespace ML::models::autoencoder_subimage {
-	using namespace ML::image::value_image;
+	struct image_bounds {
+		int x0,x1;
+		int y0,y1;
+
+		int X() const { return x1-x0; }
+		int Y() const { return y1-y0; }
+	};
 
 	enum LAYER_TYPE {
 		NONE,
-		/*
-			scale image from AxA squares to BxB squares,
-			mixing colour channels as well.
-		*/
+
+		/* connect all input neurons from input-bounds to all output neurons in output-bounds. */
+		DENSE,
+
+		/* scale image from AxA squares to BxB squares, mixing colour channels as well. */
 		ENCODE,
-		/*
-			mix pixels (channel-isolated) from centered-NxN squares
-			to centered-BxB squares, leaving image size the same.
-		*/
-		SPATIAL_MIX,
+
 		/*
 			scale image from AxA squares to BxB squares,
 			mixing pixel-values from centered-NxN squares to centered-BxB squares.
@@ -33,39 +35,35 @@ namespace ML::models::autoencoder_subimage {
 			before condensing image in next layer.
 		*/
 		ENCODE_MIX,
-		/* connect all input neurons to output neurons. */
-		DENSE,
+
+		/*
+			mix pixels (channel-isolated) from centered-NxN squares
+			to centered-BxB squares, leaving image size the same.
+		*/
+		SPATIAL_MIX,
 	};
 
 	struct layer_pattern {
 		LAYER_TYPE type;
 		int A,B,N;
+		int WEIGHTS_PER_OUTPUT_NEURON;
 
-		static layer_pattern dense() {
-			return layer_pattern{ LAYER_TYPE::DENSE, 0, 0, 0 };
+		static layer_pattern dense(simd_image_8f_dimensions idim, const image_bounds bounds_i) {
+			const int wpon = bounds_i.X() *bounds_i.Y() * idim.C;
+			return layer_pattern{ LAYER_TYPE::DENSE, 0, 0, 0, wpon };
 		}
-		static layer_pattern encode(const int A, const int B) {
-			return layer_pattern{ LAYER_TYPE::ENCODE, A, B, A };
+		static layer_pattern encode(simd_image_8f_dimensions idim, const int A, const int B) {
+			const int wpon = A * A * idim.C;
+			return layer_pattern{ LAYER_TYPE::ENCODE, A, B, A, wpon };
 		}
-		static layer_pattern encode_mix(const int A, const int B, const int N) {
-			return layer_pattern{ LAYER_TYPE::ENCODE_MIX, A, B, N };
+		static layer_pattern encode_mix(simd_image_8f_dimensions idim, const int A, const int B, const int N) {
+			const int wpon = N * N * idim.C;
+			return layer_pattern{ LAYER_TYPE::ENCODE_MIX, A, B, N, wpon };
 		}
-		static layer_pattern spatial_mix(const int N, const int B) {
-			return layer_pattern{ LAYER_TYPE::SPATIAL_MIX, B, B, N };
+		static layer_pattern spatial_mix(simd_image_8f_dimensions idim, const int N, const int B) {
+			const int wpon = N * N;
+			return layer_pattern{ LAYER_TYPE::SPATIAL_MIX, B, B, N, wpon };
 		}
-	};
-
-	struct input_neuron_offset_struct {
-		/*
-			each output-neuron reads from a similar arrangement of input-values (for example, an NxN square);
-			this arrangement is stored as a re-usable kernel of offsets.
-		*/
-		std::vector<int> kernel;
-		/*
-			each output-neuron may read from a different area of the input-image;
-			these offsets are meant to be combined with the kernel to get input-value indices.
-		*/
-		value_image<int> kernel_offsets;
 	};
 
 	///*
