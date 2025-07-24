@@ -185,12 +185,6 @@ void training_cycle(model_t& model, training_settings& settings) {
 	timepoint t0;
 	timepoint t1;
 
-	// clear accumulated error.
-	t0 = timepoint::now();
-	model.clear_batch_error();
-	t1 = timepoint::now();
-	settings.stats.push_value("dt clear err", t1.delta_us(t0));
-
 	// get samples.
 	const int n_images = settings.minibatch_size;
 	assert(5 <= n_images && n_images <= 8);// TODO - rework function to loop for larger minibatch sizes.
@@ -246,18 +240,13 @@ void training_cycle(model_t& model, training_settings& settings) {
 	// backpropagate.
 	t0 = timepoint::now();
 	const float lr_w = settings.learning_rate_w / settings.minibatch_size;
-	model.back_propagate(settings.n_threads, error_i, error_o, value_i, lr_w);
+	const float lr_b = settings.learning_rate_b / settings.minibatch_size;
+	model.back_propagate(settings.n_threads, error_i, error_o, value_i, lr_w, lr_b);
 	t1 = timepoint::now();
 	settings.stats.push_value("dt backprop", t1.delta_us(t0));
 
-	// apply accumulated error.
-	t0 = timepoint::now();
-	model.apply_batch_error_biases (settings.n_threads, settings.minibatch_size, settings.learning_rate_b);
-	t1 = timepoint::now();
-	settings.stats.push_value("dt apply err", t1.delta_us(t0));
 	timepoint tb1 = timepoint::now();
 	settings.stats.push_value("dt training batch", tb1.delta_us(tb0));
-
 	settings.batch_error_trend.push_back(batch_avg_error / settings.minibatch_size);
 	settings.cycle++;
 }

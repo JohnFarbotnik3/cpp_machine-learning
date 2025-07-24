@@ -93,7 +93,6 @@ namespace ML::models::autoencoder_subimage {
 
 	struct subimage {
 		value_image<float> biases;
-		value_image<float> biases_error;// accumulated error in biases during minibatch.
 		vector<float> weights;
 		layer_pattern pattern;
 		read_pattern kernel;
@@ -103,7 +102,6 @@ namespace ML::models::autoencoder_subimage {
 		subimage() = default;
 		subimage(const layer_pattern pattern, const simd_image_8f_dimensions idim, const value_image_dimensions subodim, const image_bounds bounds_i, const image_bounds bounds_o) :
 			biases(subodim),
-			biases_error(subodim),
 			pattern(pattern),
 			kernel(pattern, idim),
 			bounds_i(bounds_i),
@@ -268,7 +266,7 @@ namespace ML::models::autoencoder_subimage {
 			//*/
 		}
 
-		void backward_propagate_general(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
+		void backward_propagate_general(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w, const float adjustment_rate_b) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = kernel.list.size();
@@ -279,7 +277,7 @@ namespace ML::models::autoencoder_subimage {
 				const int out_n = error_o.dim.get_offset(ox, oy, oc);
 				const int wofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const vec8f signal_error_term = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
-				biases_error.data[bias_n] += simd_reduce(signal_error_term);
+				biases.data[bias_n] += std::clamp(simd_reduce(signal_error_term) * adjustment_rate_b, -0.5f, +0.5f);
 
 				const read_coords coords_offset = kernel.get_offset(pattern, idim, ox, oy, oc);
 				for(int w=0;w<WEIGHTS_PER_OUTPUT_NEURON;w++) {
@@ -293,7 +291,7 @@ namespace ML::models::autoencoder_subimage {
 				}
 			}}}
 		}
-		void backward_propagate_dense(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
+		void backward_propagate_dense(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w, const float adjustment_rate_b) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = pattern.WEIGHTS_PER_OUTPUT_NEURON;
@@ -304,7 +302,7 @@ namespace ML::models::autoencoder_subimage {
 				const int out_n = error_o.dim.get_offset(ox, oy, oc);
 				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const vec8f signal_error_term = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
-				biases_error.data[bias_n] += simd_reduce(signal_error_term);
+				biases.data[bias_n] += std::clamp(simd_reduce(signal_error_term) * adjustment_rate_b, -0.5f, +0.5f);
 
 				int w = w_ofs;
 				for(int y=bounds_i.y0;y<bounds_i.y1;y++) {
@@ -319,7 +317,7 @@ namespace ML::models::autoencoder_subimage {
 				}}}
 			}}}
 		}
-		void backward_propagate_encode(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
+		void backward_propagate_encode(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w, const float adjustment_rate_b) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int A = pattern.A;
@@ -334,7 +332,7 @@ namespace ML::models::autoencoder_subimage {
 				const int out_n = error_o.dim.get_offset(ox, oy, oc);
 				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const vec8f signal_error_term = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
-				biases_error.data[bias_n] += simd_reduce(signal_error_term);
+				biases.data[bias_n] += std::clamp(simd_reduce(signal_error_term) * adjustment_rate_b, -0.5f, +0.5f);
 
 				for(int y=0;y<A;y++) { const int iy = y + iy0;
 				for(int x=0;x<A;x++) { const int ix = x + ix0;
@@ -348,7 +346,7 @@ namespace ML::models::autoencoder_subimage {
 				}}}
 			}}}
 		}
-		void backward_propagate_encode_mix(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
+		void backward_propagate_encode_mix(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w, const float adjustment_rate_b) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int A = pattern.A;
@@ -364,7 +362,7 @@ namespace ML::models::autoencoder_subimage {
 				const int out_n = error_o.dim.get_offset(ox, oy, oc);
 				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const vec8f signal_error_term = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
-				biases_error.data[bias_n] += simd_reduce(signal_error_term);
+				biases.data[bias_n] += std::clamp(simd_reduce(signal_error_term) * adjustment_rate_b, -0.5f, +0.5f);
 
 				for(int y=0;y<N;y++) { const int iy = y + iy0; if(iy<0 || iy>=idim.Y) continue;
 				for(int x=0;x<N;x++) { const int ix = x + ix0; if(ix<0 || ix>=idim.X) continue;
@@ -390,7 +388,7 @@ namespace ML::models::autoencoder_subimage {
 				}}
 			}}}
 		}
-		void backward_propagate_spatial_mix(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
+		void backward_propagate_spatial_mix(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w, const float adjustment_rate_b) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int A = pattern.A;
@@ -406,7 +404,7 @@ namespace ML::models::autoencoder_subimage {
 				const int out_n = error_o.dim.get_offset(ox, oy, oc);
 				const int w_ofs = bias_n * WEIGHTS_PER_OUTPUT_NEURON;
 				const vec8f signal_error_term = _mm256_mul_ps(error_o.data[out_n], simd_activation_derivative(signal_o.data[out_n]));
-				biases_error.data[bias_n] += simd_reduce(signal_error_term);
+				biases.data[bias_n] += std::clamp(simd_reduce(signal_error_term) * adjustment_rate_b, -0.5f, +0.5f);
 
 				for(int y=0;y<N;y++) { const int iy = y + iy0; if(iy<0 || iy>=idim.Y) continue;
 				for(int x=0;x<N;x++) { const int ix = x + ix0; if(ix<0 || ix>=idim.X) continue;
@@ -430,7 +428,7 @@ namespace ML::models::autoencoder_subimage {
 				}}
 			}}}
 		}
-		void backward_propagate(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
+		void backward_propagate(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w, const float adjustment_rate_b) {
 			// clear related area of input image.
 			const vec8f zero = simd_value(0);
 			for(int iy=bounds_i.y0;iy<bounds_i.y1;iy++) {
@@ -441,25 +439,11 @@ namespace ML::models::autoencoder_subimage {
 
 			//backward_propagate_general(error_i, error_o, value_i, signal_o, adjustment_rate_w);
 			///*
-			if(pattern.type == LAYER_TYPE::DENSE) backward_propagate_dense(error_i, error_o, value_i, signal_o, adjustment_rate_w);
-			if(pattern.type == LAYER_TYPE::ENCODE) backward_propagate_encode(error_i, error_o, value_i, signal_o, adjustment_rate_w);
-			if(pattern.type == LAYER_TYPE::ENCODE_MIX) backward_propagate_encode_mix(error_i, error_o, value_i, signal_o, adjustment_rate_w);
-			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) backward_propagate_spatial_mix(error_i, error_o, value_i, signal_o, adjustment_rate_w);
+			if(pattern.type == LAYER_TYPE::DENSE) backward_propagate_dense(error_i, error_o, value_i, signal_o, adjustment_rate_w, adjustment_rate_b);
+			if(pattern.type == LAYER_TYPE::ENCODE) backward_propagate_encode(error_i, error_o, value_i, signal_o, adjustment_rate_w, adjustment_rate_b);
+			if(pattern.type == LAYER_TYPE::ENCODE_MIX) backward_propagate_encode_mix(error_i, error_o, value_i, signal_o, adjustment_rate_w, adjustment_rate_b);
+			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) backward_propagate_spatial_mix(error_i, error_o, value_i, signal_o, adjustment_rate_w, adjustment_rate_b);
 			//*/
-		}
-
-		void apply_batch_error_biases(const float adjustment_rate) {
-			const float BIAS_LIMIT = 100.0f;
-			const float BIAS_ADJUSTMENT_LIMIT = 0.5f;
-			for(int n=0;n<biases.data.size();n++) {
-				const float adjustment = std::clamp(biases_error.data[n] * adjustment_rate, -BIAS_ADJUSTMENT_LIMIT, +BIAS_ADJUSTMENT_LIMIT);
-				biases.data[n] = std::clamp(biases.data[n] + adjustment, -BIAS_LIMIT, +BIAS_LIMIT);
-			}
-		}
-
-		void clear_batch_error_biases() {
-			const int len = biases_error.data.size();
-			for(int x=0;x<len;x++) biases_error.data[x] = 0.0f;
 		}
 	};
 }
