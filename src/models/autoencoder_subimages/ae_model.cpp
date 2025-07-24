@@ -113,7 +113,7 @@ namespace ML::models::autoencoder_subimage {
 			memcpy(value_o.data.data(), layers.back().value_o.data.data(), value_o.data.size()*sizeof(value_o.data[0]));
 		}
 
-		void back_propagate(const int n_threads, simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i) {
+		void back_propagate(const int n_threads, simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const float adjustment_rate_w) {
 			assert(error_i.dim.equals(error_o.dim));
 			assert(error_i.dim.length() > 0);
 			assert(layers.size() > 0);
@@ -121,16 +121,13 @@ namespace ML::models::autoencoder_subimage {
 			// last layer.
 			memcpy(layers.back().error_o.data.data(), error_o.data.data(), error_o.data.size()*sizeof(error_o.data[0]));
 			// middle layers.
-			for(int L=n_layers-1;L>0;L--) layers[L].back_propagate(n_threads, layers[L-1].error_o, layers[L-1].value_o);
+			for(int L=n_layers-1;L>0;L--) layers[L].back_propagate(n_threads, layers[L-1].error_o, layers[L-1].value_o, adjustment_rate_w);
 			// first layer.
-			layers.front().back_propagate(n_threads, error_i, value_i);
+			layers.front().back_propagate(n_threads, error_i, value_i, adjustment_rate_w);
 		}
 
 		void apply_batch_error_biases(const int n_threads, const int batch_size, const float learning_rate) {
 			for(int z=0;z<layers.size();z++) layers[z].apply_batch_error_biases(n_threads, batch_size, learning_rate);
-		}
-		void apply_batch_error_weights(const int n_threads, const int batch_size, const float learning_rate) {
-			for(int z=0;z<layers.size();z++) layers[z].apply_batch_error_weights(n_threads, batch_size, learning_rate);
 		}
 		void clear_batch_error() {
 			for(int z=0;z<layers.size();z++) layers[z].clear_batch_error();

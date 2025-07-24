@@ -245,14 +245,14 @@ void training_cycle(model_t& model, training_settings& settings) {
 
 	// backpropagate.
 	t0 = timepoint::now();
-	model.back_propagate(settings.n_threads, error_i, error_o, value_i);
+	const float lr_w = settings.learning_rate_w / settings.minibatch_size;
+	model.back_propagate(settings.n_threads, error_i, error_o, value_i, lr_w);
 	t1 = timepoint::now();
 	settings.stats.push_value("dt backprop", t1.delta_us(t0));
 
 	// apply accumulated error.
 	t0 = timepoint::now();
 	model.apply_batch_error_biases (settings.n_threads, settings.minibatch_size, settings.learning_rate_b);
-	model.apply_batch_error_weights(settings.n_threads, settings.minibatch_size, settings.learning_rate_w);
 	t1 = timepoint::now();
 	settings.stats.push_value("dt apply err", t1.delta_us(t0));
 	timepoint tb1 = timepoint::now();

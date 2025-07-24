@@ -80,15 +80,15 @@ namespace ML::models::autoencoder_subimage {
 			for(int z=0;z<n_threads;z++) threads[z].join();
 		}
 
-		static void back_propagate_func(ae_layer& layer, const int beg, const int end, simd_image_8f& error_i, const simd_image_8f& value_i) {
-			for(int x=beg;x<end;x++) layer.subimages[x].backward_propagate(error_i, layer.error_o, value_i, layer.signal_o);
+		static void back_propagate_func(ae_layer& layer, const int beg, const int end, simd_image_8f& error_i, const simd_image_8f& value_i, const float adjustment_rate_w) {
+			for(int x=beg;x<end;x++) layer.subimages[x].backward_propagate(error_i, layer.error_o, value_i, layer.signal_o, adjustment_rate_w);
 		}
-		void back_propagate(const int n_threads, simd_image_8f& error_i, const simd_image_8f& value_i) {
+		void back_propagate(const int n_threads, simd_image_8f& error_i, const simd_image_8f& value_i, const float adjustment_rate_w) {
 			vector<std::thread> threads;
 			for(int z=0;z<n_threads;z++) {
 				const int beg = (subimages.size() * (z+0)) / n_threads;
 				const int end = (subimages.size() * (z+1)) / n_threads;
-				threads.push_back(std::thread(back_propagate_func, std::ref(*this), beg, end, std::ref(error_i), std::ref(value_i)));
+				threads.push_back(std::thread(back_propagate_func, std::ref(*this), beg, end, std::ref(error_i), std::ref(value_i), adjustment_rate_w));
 			}
 			for(int z=0;z<n_threads;z++) threads[z].join();
 
@@ -105,9 +105,6 @@ namespace ML::models::autoencoder_subimage {
 		static void apply_batch_error_biases_func(ae_layer& layer, const int beg, const int end, const float adjustment_rate) {
 			for(int x=beg;x<end;x++) layer.subimages[x].apply_batch_error_biases(adjustment_rate);
 		}
-		static void apply_batch_error_weights_func(ae_layer& layer, const int beg, const int end, const float adjustment_rate) {
-			for(int x=beg;x<end;x++) layer.subimages[x].apply_batch_error_weights(adjustment_rate);
-		}
 		void apply_batch_error_biases(const int n_threads, const int batch_size, const float learning_rate) {
 			const float adjustment_rate = learning_rate / batch_size;
 			vector<std::thread> threads;
@@ -118,21 +115,10 @@ namespace ML::models::autoencoder_subimage {
 			}
 			for(int z=0;z<n_threads;z++) threads[z].join();
 		}
-		void apply_batch_error_weights(const int n_threads, const int batch_size, const float learning_rate) {
-			const float adjustment_rate = learning_rate / batch_size;
-			vector<std::thread> threads;
-			for(int z=0;z<n_threads;z++) {
-				const int beg = (subimages.size() * (z+0)) / n_threads;
-				const int end = (subimages.size() * (z+1)) / n_threads;
-				threads.push_back(std::thread(apply_batch_error_weights_func, std::ref(*this), beg, end, adjustment_rate));
-			}
-			for(int z=0;z<n_threads;z++) threads[z].join();
-		}
 
 		void clear_batch_error() {
 			for(int x=0;x<subimages.size();x++) {
 				subimages[x].clear_batch_error_biases();
-				subimages[x].clear_batch_error_weights();
 			}
 		}
 

@@ -95,7 +95,6 @@ namespace ML::models::autoencoder_subimage {
 		value_image<float> biases;
 		value_image<float> biases_error;// accumulated error in biases during minibatch.
 		vector<float> weights;
-		vector<float> weights_error;
 		layer_pattern pattern;
 		read_pattern kernel;
 		image_bounds bounds_i;			// corrosponding soft boundary area of input image.
@@ -113,7 +112,6 @@ namespace ML::models::autoencoder_subimage {
 			const int n_weights_per_output_neuron = kernel.list.size();
 			const int n_weights = n_weights_per_output_neuron * biases.dim.length();
 			weights.resize(n_weights, 0.0f);
-			weights_error.resize(n_weights, 0.0f);
 			//printf("nw=%i, wpn=%i\n", n_weights, n_weights_per_output_neuron);
 		}
 
@@ -270,7 +268,7 @@ namespace ML::models::autoencoder_subimage {
 			//*/
 		}
 
-		void backward_propagate_general(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o) {
+		void backward_propagate_general(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = kernel.list.size();
@@ -290,12 +288,12 @@ namespace ML::models::autoencoder_subimage {
 					const int in_n = coords.iofs + coords_offset.iofs;
 					vec8f weight_error = _mm256_mul_ps(signal_error_term, value_i.data[in_n]);
 					vec8f input_error  = _mm256_mul_ps(signal_error_term, simd_value(weights[wofs + w]));
-					weights_error[wofs + w] += simd_reduce(weight_error);
+					weights[w] += std::clamp(simd_reduce(weight_error) * adjustment_rate_w, -1.0f, +1.0f);
 					if(kernel.is_in_write_bounds(coords, coords_offset, bounds_i)) simd_incr(error_i.data[in_n], input_error);
 				}
 			}}}
 		}
-		void backward_propagate_dense(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o) {
+		void backward_propagate_dense(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int WEIGHTS_PER_OUTPUT_NEURON = pattern.WEIGHTS_PER_OUTPUT_NEURON;
@@ -315,13 +313,13 @@ namespace ML::models::autoencoder_subimage {
 					const int in_n = idim.get_offset(x, y, c);
 					const vec8f weight_error = _mm256_mul_ps(signal_error_term, value_i.data[in_n]);
 					const vec8f input_error  = _mm256_mul_ps(signal_error_term, simd_value(weights[w]));
-					weights_error[w] += simd_reduce(weight_error);
+					weights[w] += std::clamp(simd_reduce(weight_error) * adjustment_rate_w, -1.0f, +1.0f);
 					simd_incr(error_i.data[in_n], input_error);
 					w++;
 				}}}
 			}}}
 		}
-		void backward_propagate_encode(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o) {
+		void backward_propagate_encode(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int A = pattern.A;
@@ -345,12 +343,12 @@ namespace ML::models::autoencoder_subimage {
 					const int w = w_ofs + y*W_STRIDE_Y + x*W_STRIDE_X + c;
 					const vec8f weight_error = _mm256_mul_ps(signal_error_term, value_i.data[in_n]);
 					const vec8f input_error  = _mm256_mul_ps(signal_error_term, simd_value(weights[w]));
-					weights_error[w] += simd_reduce(weight_error);
+					weights[w] += std::clamp(simd_reduce(weight_error) * adjustment_rate_w, -1.0f, +1.0f);
 					simd_incr(error_i.data[in_n], input_error);
 				}}}
 			}}}
 		}
-		void backward_propagate_encode_mix(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o) {
+		void backward_propagate_encode_mix(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int A = pattern.A;
@@ -379,7 +377,7 @@ namespace ML::models::autoencoder_subimage {
 					const int w = w_ofs + y*W_STRIDE_Y + x*W_STRIDE_X + c;
 					const vec8f weight_error = _mm256_mul_ps(signal_error_term, value_i.data[in_n]);
 					const vec8f input_error  = _mm256_mul_ps(signal_error_term, simd_value(weights[w]));
-					weights_error[w] += simd_reduce(weight_error);
+					weights[w] += std::clamp(simd_reduce(weight_error) * adjustment_rate_w, -1.0f, +1.0f);
 					simd_incr(error_i.data[in_n], input_error);
 				}}
 				else {
@@ -387,12 +385,12 @@ namespace ML::models::autoencoder_subimage {
 					const int in_n = idim.get_offset(ix, iy, c);
 					const int w = w_ofs + y*W_STRIDE_Y + x*W_STRIDE_X + c;
 					const vec8f weight_error = _mm256_mul_ps(signal_error_term, value_i.data[in_n]);
-					weights_error[w] += simd_reduce(weight_error);
+					weights[w] += std::clamp(simd_reduce(weight_error) * adjustment_rate_w, -1.0f, +1.0f);
 				}}
 				}}
 			}}}
 		}
-		void backward_propagate_spatial_mix(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o) {
+		void backward_propagate_spatial_mix(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
 			const simd_image_8f_dimensions idim = error_i.dim;
 			const simd_image_8f_dimensions odim = error_o.dim;
 			const int A = pattern.A;
@@ -420,19 +418,19 @@ namespace ML::models::autoencoder_subimage {
 					const int w = w_ofs + y*W_STRIDE_Y + x*W_STRIDE_X;
 					const vec8f weight_error = _mm256_mul_ps(signal_error_term, value_i.data[in_n]);
 					const vec8f input_error  = _mm256_mul_ps(signal_error_term, simd_value(weights[w]));
-					weights_error[w] += simd_reduce(weight_error);
+					weights[w] += std::clamp(simd_reduce(weight_error) * adjustment_rate_w, -1.0f, +1.0f);
 					simd_incr(error_i.data[in_n], input_error);
 				}
 				else {
 					const int in_n = idim.get_offset(ix, iy, oc);
 					const int w = w_ofs + y*W_STRIDE_Y + x*W_STRIDE_X;
 					const vec8f weight_error = _mm256_mul_ps(signal_error_term, value_i.data[in_n]);
-					weights_error[w] += simd_reduce(weight_error);
+					weights[w] += std::clamp(simd_reduce(weight_error) * adjustment_rate_w, -1.0f, +1.0f);
 				}
 				}}
 			}}}
 		}
-		void backward_propagate(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o) {
+		void backward_propagate(simd_image_8f& error_i, const simd_image_8f& error_o, const simd_image_8f& value_i, const simd_image_8f& signal_o, const float adjustment_rate_w) {
 			// clear related area of input image.
 			const vec8f zero = simd_value(0);
 			for(int iy=bounds_i.y0;iy<bounds_i.y1;iy++) {
@@ -441,12 +439,12 @@ namespace ML::models::autoencoder_subimage {
 				for(int iofs=i0;iofs<i1;iofs++) error_i.data[iofs] = zero;
 			}
 
-			//backward_propagate_general(error_i, error_o, value_i, signal_o);
+			//backward_propagate_general(error_i, error_o, value_i, signal_o, adjustment_rate_w);
 			///*
-			if(pattern.type == LAYER_TYPE::DENSE) backward_propagate_dense(error_i, error_o, value_i, signal_o);
-			if(pattern.type == LAYER_TYPE::ENCODE) backward_propagate_encode(error_i, error_o, value_i, signal_o);
-			if(pattern.type == LAYER_TYPE::ENCODE_MIX) backward_propagate_encode_mix(error_i, error_o, value_i, signal_o);
-			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) backward_propagate_spatial_mix(error_i, error_o, value_i, signal_o);
+			if(pattern.type == LAYER_TYPE::DENSE) backward_propagate_dense(error_i, error_o, value_i, signal_o, adjustment_rate_w);
+			if(pattern.type == LAYER_TYPE::ENCODE) backward_propagate_encode(error_i, error_o, value_i, signal_o, adjustment_rate_w);
+			if(pattern.type == LAYER_TYPE::ENCODE_MIX) backward_propagate_encode_mix(error_i, error_o, value_i, signal_o, adjustment_rate_w);
+			if(pattern.type == LAYER_TYPE::SPATIAL_MIX) backward_propagate_spatial_mix(error_i, error_o, value_i, signal_o, adjustment_rate_w);
 			//*/
 		}
 
@@ -458,22 +456,10 @@ namespace ML::models::autoencoder_subimage {
 				biases.data[n] = std::clamp(biases.data[n] + adjustment, -BIAS_LIMIT, +BIAS_LIMIT);
 			}
 		}
-		void apply_batch_error_weights(const float adjustment_rate) {
-			const float WEIGHT_LIMIT = 100.0f;
-			const float WEIGHT_ADJUSTMENT_LIMIT = 1.0f;
-			for(int x=0;x<weights.size();x++) {
-				const float adjustment = std::clamp(weights_error[x] * adjustment_rate, -WEIGHT_ADJUSTMENT_LIMIT, +WEIGHT_ADJUSTMENT_LIMIT);
-				weights[x] = std::clamp(weights[x] + adjustment, -WEIGHT_LIMIT, +WEIGHT_LIMIT);
-			}
-		}
 
 		void clear_batch_error_biases() {
 			const int len = biases_error.data.size();
 			for(int x=0;x<len;x++) biases_error.data[x] = 0.0f;
-		}
-		void clear_batch_error_weights() {
-			const int len = weights_error.size();
-			for(int x=0;x<len;x++) weights_error[x] = 0.0f;
 		}
 	};
 }
