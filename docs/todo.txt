@@ -234,9 +234,8 @@ and some things will be made simpler by having a *fixed* number of targets for e
 
 > subimage autoencoder
 ** read SIMD optimization guide, as there may be many very suboptimal things I am doing that I dont even know about.
-* pass training stats to model functions to allow for more granularity of timing measurements.
 * implement vec16f and larger batches to observe if performance uplift continues (since right now weights still seem to be majority of memory bandwidth).
-- to benchmark: remove batch_apply_error() and batch_clear_error(), and instead directly modify weights in backprop function.
+^ make vector-type a template argument, and encapsulate used operations in its respective struct, so that different vector sizes can be used interchangeably.
 
 
 > add to journal:
@@ -246,6 +245,9 @@ and some things will be made simpler by having a *fixed* number of targets for e
 	^ this speeds up backprop enough that simpler write-oriented algorithm is probably sufficient.
 - optimization: interleaving mini-batches of images at the pixel-value level for optimal memory access and SIMD.
 	^ this renders many of my previous methods of optimization obsolete.
+- optimization: apply error adjustments directly to weights & biases instead of storing them and applying after batch.
+	^ note that this now constrains batch size to the vector-width of the SIMD images,
+	but seems very much worthwhile due to memory bandwidth of weights being a serious limiting factor.
 ...
 
 
