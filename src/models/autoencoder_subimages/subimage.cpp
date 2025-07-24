@@ -468,10 +468,12 @@ namespace ML::models::autoencoder_subimage {
 		}
 
 		void clear_batch_error_biases() {
-			biases_error.data.assign(biases_error.data.size(), 0.0f);
+			const int len = biases_error.data.size();
+			for(int x=0;x<len;x++) biases_error.data[x] = 0.0f;
 		}
 		void clear_batch_error_weights() {
-			weights_error.assign(weights_error.size(), 0.0f);
+			const int len = weights_error.size();
+			for(int x=0;x<len;x++) weights_error[x] = 0.0f;
 		}
 	};
 }
