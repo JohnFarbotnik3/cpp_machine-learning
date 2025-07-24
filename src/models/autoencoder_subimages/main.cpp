@@ -121,6 +121,8 @@ struct training_settings {
 	int minibatch_size;
 	int seed;
 	std::mt19937 gen32;
+	int skip_next_lr_update_w = 0;
+	int skip_next_lr_update_b = 0;
 };
 
 void print_usage(string msg) {
@@ -263,6 +265,8 @@ float rolling_average_last_n(const vector<float> values, const int N) {
 }
 void update_learning_rate(model_t& model, training_settings& settings, int cycles, const char mode) {
 	assert(mode == 'b' || mode == 'w');
+	if(mode == 'w' && settings.skip_next_lr_update_w > 0) { settings.skip_next_lr_update_w--; return; }
+	if(mode == 'b' && settings.skip_next_lr_update_b > 0) { settings.skip_next_lr_update_b--; return; }
 	const float LEARNING_RATE_LIMIT = 1.0f;
 	float best_avg_error;
 	training_settings best_settings = settings;
@@ -271,8 +275,8 @@ void update_learning_rate(model_t& model, training_settings& settings, int cycle
 	const float rate = (mode == 'b') ? settings.learning_rate_b : settings.learning_rate_w;
 	if(rate == 0.0f) return;// ignore learning rate if 0.
 	vector<float> lr_mults = rate >= LEARNING_RATE_LIMIT
-		? vector<float>{ 1.0, 0.7 }
-		: vector<float>{ 1.0, 0.7, 1.2 };
+		? vector<float>{ 1.0, 0.5 }
+		: vector<float>{ 1.0, 0.5, 1.2 };
 	for(int z=0;z<lr_mults.size();z++) {
 		training_settings test_settings = settings;
 		model_t test_model = model;
@@ -291,6 +295,8 @@ void update_learning_rate(model_t& model, training_settings& settings, int cycle
 	}
 	model = best_model;
 	settings = best_settings;
+	if(mode == 'w' && settings.learning_rate_w == rate) settings.skip_next_lr_update_w+=1;
+	if(mode == 'b' && settings.learning_rate_b == rate) settings.skip_next_lr_update_b+=3;
 }
 
 void print_training_stats(ML::stats::training_stats& stats) {

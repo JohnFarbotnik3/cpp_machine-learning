@@ -229,6 +229,7 @@ and some things will be made simpler by having a *fixed* number of targets for e
 		if writing my own, try javascript style names like "console.log(...)".)
 - add commandline arguments for model-parameter distributions.
 * experiment with different colour-channel formats, example RGB, HSL, etc...
+- model still seems to decreases learning rate too aggresively (why?).
 ...
 
 
@@ -236,7 +237,7 @@ and some things will be made simpler by having a *fixed* number of targets for e
 ** read SIMD optimization guide, as there may be many very suboptimal things I am doing that I dont even know about.
 * implement vec16f and larger batches to observe if performance uplift continues (since right now weights still seem to be majority of memory bandwidth).
 ^ make vector-type a template argument, and encapsulate used operations in its respective struct, so that different vector sizes can be used interchangeably.
-^ allow custom vector-type to have runtime defined width that is a multiple of 8 (if using mm256 as the base type).
+^ allow custom vector-type with template argument vector_width that is a multiple of 8 (if using mm256 as the base type).
 
 
 

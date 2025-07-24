@@ -3,7 +3,6 @@
 #define F_simd_cpp
 
 #include <cassert>
-#include <cstdint>
 #include <immintrin.h>
 #include <thread>
 
@@ -21,9 +20,6 @@ namespace ML::models::autoencoder_subimage {
 		vec8i(__m256i x) : data(x) {}
 		operator __m256i() const { return data; }
 	};
-
-	const int vec8f_LENGTH = 8;
-
 
 	vec8f simd_value(const float value) {
 		return _mm256_set1_ps(value);
@@ -56,23 +52,11 @@ namespace ML::models::autoencoder_subimage {
 	}
 
 
-	bool simd_eq(vec8f a, vec8f b) {
-		uint32_t data[vec8f_LENGTH];
-		_mm256_storeu_ps((float*)data, _mm256_cmp_ps(a, b, _CMP_NEQ_OS));
-		uint32_t result = 0;
-		for(int x=0;x<vec8f_LENGTH;x++) result |= data[x];
-		return result == 0;
-	}
 	float simd_reduce(vec8f a) {
 		// NOTE: _mm256_hadd_ps may be useful for a similar operation with 16 floats.
 		// TODO: see if there is a version for 2 groups of 4 floats and benchmark it.
 		return	(a.data[0] + a.data[1] + a.data[2] + a.data[3]) +
 				(a.data[4] + a.data[5] + a.data[6] + a.data[7]);
-	}
-	float simd_reduce(const vec8f* data, const size_t len) {
-		vec8f sum = simd_value(0);
-		for(int x=0;x<len;x++) sum = _mm256_add_ps(sum, data[x]);
-		return simd_reduce(sum);
 	}
 	float simd_reduce_abs(const vec8f* data, const size_t len) {
 		vec8f sum = simd_value(0);
