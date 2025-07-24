@@ -64,9 +64,10 @@ namespace ML::models::autoencoder_subimage {
 		return result == 0;
 	}
 	float simd_reduce(vec8f a) {
-		float sum = 0;
-		for(int x=0;x<vec8f_LENGTH;x++) sum += a.data[x];
-		return sum;
+		// NOTE: _mm256_hadd_ps may be useful for a similar operation with 16 floats.
+		// TODO: see if there is a version for 2 groups of 4 floats and benchmark it.
+		return	(a.data[0] + a.data[1] + a.data[2] + a.data[3]) +
+				(a.data[4] + a.data[5] + a.data[6] + a.data[7]);
 	}
 	float simd_reduce(const vec8f* data, const size_t len) {
 		vec8f sum = simd_value(0);
